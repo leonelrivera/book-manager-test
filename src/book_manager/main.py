@@ -14,7 +14,7 @@ from book_manager.ui.console import ConsolaUI
 
 def main(
     import_default_data: bool = False,
-    modo_interactivo: bool = False,
+    modo_interactivo: bool = True,
     ruta_csv: Optional[str] = None,
 ) -> BookManagerService:
     """Función principal de ejecución del sistema Book Manager.
