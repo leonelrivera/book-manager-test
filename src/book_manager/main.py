@@ -14,7 +14,6 @@ from book_manager.ui.console import ConsolaUI
 
 def main(
     import_default_data: bool = False,
-    modo_interactivo: bool = True,
     ruta_csv: Optional[str] = None,
 ) -> BookManagerService:
     """Función principal de ejecución del sistema Book Manager.
@@ -22,8 +21,6 @@ def main(
     Args:
         import_default_data (bool): Si es True o si el sistema detecta repositorios vacíos,
                                     importa automáticamente los datos desde migrations/csv.
-        modo_interactivo (bool): Si es True, inicia el menú interactivo de consola.
-                                 Si es False, ejecuta la demostración automatizada requerida por la entrega.
         ruta_csv (Optional[str]): Ruta personalizada hacia los archivos CSV (opcional).
 
     Returns:
@@ -49,17 +46,13 @@ def main(
     # 3. Inicialización de la interfaz de consola
     ui = ConsolaUI(bm_service)
 
-    # 4. Ejecución del modo seleccionado
-    if modo_interactivo:
-        ui.iniciar_menu_interactivo()
-    else:
-        ui.ejecutar_demostracion_completa()
+    # 4. Ejecución del menú principal
+    ui.iniciar_menu_interactivo()
 
     return bm_service
 
 
 if __name__ == "__main__":
-    # Flags por línea de comandos: --menu para modo interactivo, --import-data para forzar recarga
+    # Flags por línea de comandos: --import-data para forzar recarga
     forzar_importacion = "--import-data" in sys.argv or "-i" in sys.argv
-    activar_menu = "--menu" in sys.argv or "-m" in sys.argv
-    main(import_default_data=forzar_importacion, modo_interactivo=activar_menu)
+    main(import_default_data=forzar_importacion)

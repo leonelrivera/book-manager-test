@@ -396,66 +396,6 @@ class ConsolaUI:
         self.imprimir_separador()
 
     # ---------------------------------------------------------
-    # Secuencia de Verificación Integral
-    # ---------------------------------------------------------
-    def ejecutar_demostracion_completa(self) -> None:
-        """Ejecuta en orden un listado y alta/modificación de cada modelo, y todos los reportes."""
-        self.imprimir_encabezado("INICIO DE EJECUCIÓN DEL SISTEMA - BOOK MANAGER (SPRINT 1)")
-
-        # 1. Libro
-        self.listar_libros()
-        print("\n➕ Realizando Alta de Libro de prueba...")
-        self.crear_libro("978-950-12-9999-9", "Fundamentos de Python", "Guido van Rossum", 10, 10, 2026, 350)
-        print("✏️ Realizando Modificación de Libro...")
-        self.actualizar_libro(1, "978-950-07-0000-0", "Rayuela (Edición 60 Aniversario)", "Julio Cortazar", 1, 1, 2023, 640)
-
-        # 2. Género
-        self.listar_generos()
-        print("\n➕ Realizando Alta de Género de prueba...")
-        self.crear_genero("Divulgación Científica", "Libros accesibles sobre ciencia y sociedad")
-
-        # 3. Editorial
-        self.listar_editoriales()
-        print("\n➕ Realizando Alta de Editorial de prueba...")
-        self.crear_editorial("Ediciones UGR", "Argentina", "editorial@ugr.edu.ar")
-
-        # 4. Moneda
-        self.listar_monedas()
-        print("\n➕ Realizando Alta de Moneda de prueba...")
-        self.crear_moneda("COP", "Peso Colombiano", "COP$")
-
-        # 5. TipoCotizacion
-        self.listar_tipos_cotizacion()
-        print("\n➕ Realizando Alta de Tipo de Cotización...")
-        self.crear_tipo_cotizacion("Dolar MEP Inverso", "MEP calculado en tiempo real")
-
-        # 6. Precio
-        self.listar_precios()
-        print("\n➕ Fijando / Actualizando Precio...")
-        self.fijar_precio(1, 1, 29500.00)
-
-        # 7. Stock
-        self.listar_stock()
-        print("\n➕ Asignando / Modificando Stock...")
-        self.asignar_stock(1, 18, "Deposito Central - Sector A")
-
-        # 8. Cotización Dólar
-        self.listar_cotizaciones()
-        print("\n➕ Registrando Cotización de Dólar...")
-        self.registrar_cotizacion(2, "2026-09-27", 1250.00, 1275.00)
-
-        # 9. Todos los Reportes Solicitados
-        print("\n" + "#" * 70)
-        print(" EJECUCIÓN DE TODOS LOS REPORTES SOLICITADOS ".center(70, "#"))
-        print("#" * 70)
-        self.mostrar_reporte_catalogo(tipo_dolar="Blue")
-        self.mostrar_reporte_valorizacion(tipo_dolar="Blue")
-        self.mostrar_reporte_stock_critico(umbral=5)
-        self.mostrar_reporte_generos()
-
-        self.imprimir_encabezado("FIN DE EJECUCIÓN DE PRUEBAS - SPRINT 1 COMPLETADO CON ÉXITO")
-
-    # ---------------------------------------------------------
     # Menú Interactivo de Navegación con Match-Case
     # ---------------------------------------------------------
     def iniciar_menu_interactivo(self) -> None:
@@ -470,7 +410,6 @@ class ConsolaUI:
             print("6. 💰 Lista de Precios")
             print("7. 📦 Control de Stock e Inventario")
             print("8. 📊 Menú de Reportes Analíticos")
-            print("9. ⚡ Ejecutar Demostración Completa Automatizada")
             print("0. 🚪 Salir del Sistema")
             self.imprimir_separador()
 
@@ -493,8 +432,6 @@ class ConsolaUI:
                     self._menu_stock()
                 case "8":
                     self._menu_reportes()
-                case "9":
-                    self.ejecutar_demostracion_completa()
                 case "0" | "salir" | "exit" | "q":
                     print("\n👋 ¡Gracias por utilizar Book Manager! Hasta luego.\n")
                     break
