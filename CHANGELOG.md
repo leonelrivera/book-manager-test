@@ -1,3 +1,9 @@
+[Ejercicio 2]
+* Implementación de la clase `ConexionDB` en `src/book_manager/database/connection.py` para la gestión centralizada de la base de datos relacional.
+* Integración con SQLAlchemy 2.0 (`create_engine`, `sessionmaker`) y soporte para Supabase (PostgreSQL) con compatibilidad de variables de entorno mediante `python-dotenv`.
+* Configuración de `pool_pre_ping=True` para resiliencia ante cortes de conexión en servicios cloud.
+* Métodos de obtención de motor, creación de sesiones y verificación de conectividad mediante `probar_conexion()`.
+
 [Ejercicio 1]
 * Inicialización de la rama de trabajo `Sprint_2` partiendo de `Sprint_1`.
 * Creación y configuración de la nueva estructura de directorios: paquetes `database/`, `models/` y carpeta de migraciones `migrations/sql/`.
