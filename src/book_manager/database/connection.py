@@ -36,9 +36,11 @@ class ConexionDB:
         if database_url is None:
             database_url = os.getenv("DATABASE_URL", "sqlite:///book_manager.db")
 
-        # Corrección de prefijo histórico postgres:// para compatibilidad con SQLAlchemy 2.0
+        # Corrección de prefijo para compatibilidad con SQLAlchemy 2.0 y psycopg2
         if database_url.startswith("postgres://"):
-            database_url = database_url.replace("postgres://", "postgresql://", 1)
+            database_url = database_url.replace("postgres://", "postgresql+psycopg2://", 1)
+        elif database_url.startswith("postgresql://") and not database_url.startswith("postgresql+"):
+            database_url = database_url.replace("postgresql://", "postgresql+psycopg2://", 1)
 
         self._database_url: str = database_url
 
