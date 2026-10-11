@@ -49,6 +49,9 @@ class GeneroService:
     def obtener_por_id(self, id_genero: int) -> Optional[Genero]:
         return self._repo.leer_por_id(id_genero)
 
+    def obtener_por_nombre(self, nombre: str) -> Optional[Genero]:
+        return self._repo.buscar_por_nombre(nombre)
+
     def listar_todos(self) -> List[Genero]:
         return self._repo.leer_todos()
 
@@ -87,6 +90,9 @@ class EditorialService:
 
     def obtener_por_id(self, id_editorial: int) -> Optional[Editorial]:
         return self._repo.leer_por_id(id_editorial)
+
+    def obtener_por_nombre(self, nombre: str) -> Optional[Editorial]:
+        return self._repo.buscar_por_nombre(nombre)
 
     def listar_todas(self) -> List[Editorial]:
         return self._repo.leer_todos()
@@ -462,13 +468,19 @@ class PrecioService:
         if moneda_ars and moneda_destino.upper() == "USD":
             precio_ars = self._repo_precio.leer_por_libro_y_moneda(id_libro, moneda_ars.id)
             if precio_ars:
-                return self.convertir_precio(precio_ars.valor, "ARS", "USD", tipo_dolar)
+                try:
+                    return self.convertir_precio(precio_ars.valor, "ARS", "USD", tipo_dolar)
+                except (ValueError, NotImplementedError):
+                    return None
 
         moneda_usd = self._repo_moneda.buscar_por_codigo("USD")
         if moneda_usd and moneda_destino.upper() == "ARS":
             precio_usd = self._repo_precio.leer_por_libro_y_moneda(id_libro, moneda_usd.id)
             if precio_usd:
-                return self.convertir_precio(precio_usd.valor, "USD", "ARS", tipo_dolar)
+                try:
+                    return self.convertir_precio(precio_usd.valor, "USD", "ARS", tipo_dolar)
+                except (ValueError, NotImplementedError):
+                    return None
 
         return None
 
