@@ -574,7 +574,7 @@ class ConsolaUI:
         print("\n--- 8. MODELO STOCK ---")
         self.listar_stock()
         print(">> Alta / Modificación de Stock:")
-        stk = self.bm.stock_service.obtener_por_libro(1)
+        stk = self.bm.stock_service.obtener_stock_por_libro(1)
         if not stk:
             self.asignar_stock(1, 10, "Depósito Central")
         else:
