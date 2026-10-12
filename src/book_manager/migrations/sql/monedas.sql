@@ -1,5 +1,5 @@
 -- Migración de datos para la tabla: monedas
--- Total de registros: 11
+-- Total de registros: 10
 
 INSERT INTO monedas (id, codigo, nombre, simbolo) VALUES (1, 'ARS', 'Peso Argentino', '$');
 INSERT INTO monedas (id, codigo, nombre, simbolo) VALUES (2, 'USD', 'Dolar Estadounidense', 'US$');
@@ -11,4 +11,3 @@ INSERT INTO monedas (id, codigo, nombre, simbolo) VALUES (7, 'UYU', 'Peso Urugua
 INSERT INTO monedas (id, codigo, nombre, simbolo) VALUES (8, 'JPY', 'Yen Japones', '¥');
 INSERT INTO monedas (id, codigo, nombre, simbolo) VALUES (9, 'CAD', 'Dolar Canadiense', 'CA$');
 INSERT INTO monedas (id, codigo, nombre, simbolo) VALUES (10, 'CHF', 'Franco Suizo', 'CHF');
-INSERT INTO monedas (id, codigo, nombre, simbolo) VALUES (11, 'COP', 'Peso Colombiano', 'COP$');

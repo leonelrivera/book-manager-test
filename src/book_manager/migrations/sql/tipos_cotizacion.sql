@@ -1,5 +1,5 @@
 -- Migración de datos para la tabla: tipos_cotizacion
--- Total de registros: 11
+-- Total de registros: 10
 
 INSERT INTO tipos_cotizacion (id, nombre, descripcion) VALUES (1, 'Oficial', 'Cotizacion oficial del Banco Central');
 INSERT INTO tipos_cotizacion (id, nombre, descripcion) VALUES (2, 'Blue', 'Cotizacion informal del mercado libre');
@@ -11,4 +11,3 @@ INSERT INTO tipos_cotizacion (id, nombre, descripcion) VALUES (7, 'Cripto', 'Cot
 INSERT INTO tipos_cotizacion (id, nombre, descripcion) VALUES (8, 'Solidario', 'Dolar con recargo impositivo');
 INSERT INTO tipos_cotizacion (id, nombre, descripcion) VALUES (9, 'Ahorro', 'Dolar para atesoramiento de personas fisicas');
 INSERT INTO tipos_cotizacion (id, nombre, descripcion) VALUES (10, 'Futuro', 'Cotizacion en mercados a termino Rofex');
-INSERT INTO tipos_cotizacion (id, nombre, descripcion) VALUES (11, 'Dolar MEP Inverso', 'MEP calculado en tiempo real');

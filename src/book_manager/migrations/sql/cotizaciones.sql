@@ -1,5 +1,5 @@
 -- Migración de datos para la tabla: cotizaciones
--- Total de registros: 11
+-- Total de registros: 10
 
 INSERT INTO cotizaciones (id, id_tipo, fecha, compra, venta) VALUES (1, 1, '2026-09-20', 960.0, 1000.0);
 INSERT INTO cotizaciones (id, id_tipo, fecha, compra, venta) VALUES (2, 1, '2026-09-26', 970.0, 1010.0);
@@ -11,4 +11,3 @@ INSERT INTO cotizaciones (id, id_tipo, fecha, compra, venta) VALUES (7, 4, '2026
 INSERT INTO cotizaciones (id, id_tipo, fecha, compra, venta) VALUES (8, 4, '2026-09-26', 1230.0, 1250.0);
 INSERT INTO cotizaciones (id, id_tipo, fecha, compra, venta) VALUES (9, 5, '2026-09-26', 1550.0, 1616.0);
 INSERT INTO cotizaciones (id, id_tipo, fecha, compra, venta) VALUES (10, 7, '2026-09-26', 1245.0, 1265.0);
-INSERT INTO cotizaciones (id, id_tipo, fecha, compra, venta) VALUES (11, 2, '2026-09-27', 1250.0, 1275.0);

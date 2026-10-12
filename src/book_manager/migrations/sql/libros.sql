@@ -1,5 +1,5 @@
 -- Migración de datos para la tabla: libros
--- Total de registros: 11
+-- Total de registros: 10
 
 INSERT INTO libros (id, isbn, titulo, autor, anio_publicacion, paginas, id_genero, id_editorial) VALUES (1, '978-950-07-0000-0', 'Rayuela (Edición 60 Aniversario)', 'Julio Cortazar', 2023, 640, 1, 1);
 INSERT INTO libros (id, isbn, titulo, autor, anio_publicacion, paginas, id_genero, id_editorial) VALUES (2, '978-950-04-0000-1', 'Ficciones', 'Jorge Luis Borges', 1944, 220, 2, 2);
@@ -11,4 +11,3 @@ INSERT INTO libros (id, isbn, titulo, autor, anio_publicacion, paginas, id_gener
 INSERT INTO libros (id, isbn, titulo, autor, anio_publicacion, paginas, id_genero, id_editorial) VALUES (8, '978-950-12-0000-7', 'Habitos Atomicos', 'James Clear', 2018, 320, 7, 9);
 INSERT INTO libros (id, isbn, titulo, autor, anio_publicacion, paginas, id_genero, id_editorial) VALUES (9, '978-950-03-0000-8', 'Martin Fierro', 'Jose Hernandez', 1872, 190, 9, 10);
 INSERT INTO libros (id, isbn, titulo, autor, anio_publicacion, paginas, id_genero, id_editorial) VALUES (10, '978-987-84-0000-9', 'Python para Ciencia de Datos', 'Guido van Rossum', 2022, 450, 10, 10);
-INSERT INTO libros (id, isbn, titulo, autor, anio_publicacion, paginas, id_genero, id_editorial) VALUES (11, '978-950-12-9999-9', 'Fundamentos de Python', 'Guido van Rossum', 2026, 350, 10, 10);
