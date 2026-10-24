@@ -495,6 +495,32 @@ class ConsolaUI:
         print("💡 Puede descargar el archivo CSV para su análisis detallado o importación en hojas de cálculo.")
         return resultado
 
+    def generar_reporte_excel_precios(self, ruta_excel: Optional[str] = None) -> str:
+        """Genera el reporte de precios en formato Excel (.xlsx) utilizando openpyxl.
+
+        Campos generados en el archivo:
+            - Libro: Título de la obra
+            - Precio interno: Precio de venta interno en ARS
+            - Precio web: Precio obtenido desde el competidor (Cúspide Libros)
+            - Diferencia: Discrepancia calculada (Precio web - Precio interno)
+            - Fecha de extracción: Timestamp de captura del dato
+
+        Args:
+            ruta_excel: Ruta opcional de destino para el archivo .xlsx.
+
+        Returns:
+            str: Ruta absoluta al archivo generado.
+        """
+        self.imprimir_encabezado("REPORTE EN EXCEL: PRECIOS Y COMPETENCIA (OPENPYXL)")
+        print("📊 Procesando datos del catálogo interno y extracciones web de Cúspide...")
+        ruta_generada = self.bm.reporte_service.generar_reporte_excel_precios(ruta_excel=ruta_excel)
+        print("✅ Reporte Excel (.xlsx) generado exitosamente:")
+        print(f"   📁 {ruta_generada}")
+        print("💡 Columnas incluidas: [Libro, Precio interno, Precio web, Diferencia, Fecha de extracción]")
+        print("📥 Puede descargar o abrir este archivo en Microsoft Excel, LibreOffice Calc o Google Sheets.")
+        self.imprimir_separador()
+        return ruta_generada
+
     # ---------------------------------------------------------
     # REPORTES ANALÍTICOS
     # ---------------------------------------------------------
@@ -657,6 +683,9 @@ class ConsolaUI:
         self.mostrar_reporte_valorizacion(tipo_dolar="Blue")
         self.mostrar_reporte_stock_critico(umbral=5)
         self.mostrar_reporte_generos()
+
+        print("\n[Reporte Excel: Precios internos vs web (openpyxl)]")
+        self.generar_reporte_excel_precios()
         print("\n✅ Demostración y comprobaciones completadas exitosamente.")
 
     # ---------------------------------------------------------
@@ -981,6 +1010,7 @@ class ConsolaUI:
             print("4. 📊 Reporte: Distribución de Títulos por Género")
             print("5. 💱 Reporte: Lista de Precios Bimonetaria")
             print("6. 🕷️ Scraping de Competencia y Alertas de Precios (Cúspide CSV)")
+            print("7. 📑 Generar Reporte de Precios en Excel (.xlsx con openpyxl)")
             print("0. Volver al menú principal")
             self.imprimir_separador()
             op = input("Seleccione un reporte: ").strip()
@@ -1001,6 +1031,8 @@ class ConsolaUI:
                     self.ver_precios_bimonetarios()
                 case "6":
                     self.ejecutar_scraping_y_alertas()
+                case "7":
+                    self.generar_reporte_excel_precios()
                 case "0":
                     break
                 case _:

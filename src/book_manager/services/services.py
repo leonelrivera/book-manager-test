@@ -626,6 +626,7 @@ class ReporteService:
         editorial_service: EditorialService,
         cotizacion_service: CotizacionService,
         tipo_cotizacion_service: TipoCotizacionService,
+        comparador_service: Optional["ComparadorPreciosService"] = None,
     ) -> None:
         self._libro_svc = libro_service
         self._stock_svc = stock_service
@@ -634,6 +635,35 @@ class ReporteService:
         self._editorial_svc = editorial_service
         self._cotizacion_svc = cotizacion_service
         self._tipo_svc = tipo_cotizacion_service
+        self._comparador_service = comparador_service
+
+    def generar_reporte_excel_precios(
+        self,
+        comparaciones: Optional[List[Dict[str, Any]]] = None,
+        ruta_excel: Optional[str] = None,
+    ) -> str:
+        """Genera el reporte de precios en formato Excel (.xlsx) requerido en Ejercicio 05.
+
+        Campos generados:
+            - Libro: Título de la obra
+            - Precio interno: Precio asignado en el catálogo interno en ARS
+            - Precio web: Precio obtenido desde el competidor web (Cúspide Libros)
+            - Diferencia: Discrepancia calculada (Precio web - Precio interno)
+            - Fecha de extracción: Timestamp de captura del dato
+
+        Args:
+            comparaciones: Lista opcional de diccionarios de comparaciones.
+            ruta_excel: Ruta opcional para guardar el archivo .xlsx.
+
+        Returns:
+            str: Ruta absoluta al archivo Excel generado.
+        """
+        if self._comparador_service is None:
+            self._comparador_service = ComparadorPreciosService(self._libro_svc, self._precio_svc)
+        return self._comparador_service.generar_reporte_excel(
+            comparaciones=comparaciones,
+            ruta_excel=ruta_excel,
+        )
 
     def reporte_catalogo_completo(self, tipo_dolar: str = "Blue") -> List[Dict[str, Any]]:
         """Genera el catálogo consolidado de libros con existencias y precios en ARS y USD."""
@@ -922,6 +952,243 @@ class ComparadorPreciosService:
             "archivo_csv": ruta_generada,
         }
 
+    def generar_reporte_excel(
+        self,
+        comparaciones: Optional[List[Dict[str, Any]]] = None,
+        ruta_excel: Optional[str] = None,
+    ) -> str:
+        """Genera un reporte analítico en formato Excel (.xlsx) con openpyxl.
+
+        Campos requeridos según especificación de Ejercicio 05:
+            - Libro: Título de la obra literaria
+            - Precio interno: Precio asignado en el catálogo interno en ARS
+            - Precio web: Precio extraído del competidor web (Cúspide Libros)
+            - Diferencia: Discrepancia calculada (Precio web - Precio interno)
+            - Fecha de extracción: Timestamp de captura del dato
+
+        Args:
+            comparaciones: Lista opcional de diccionarios con comparaciones.
+                Si no se proporciona, intenta leer desde reportes/alertas_precios.csv
+                o genera comparaciones a partir del catálogo interno.
+            ruta_excel: Ruta de destino opcional del archivo Excel. Por defecto
+                se guarda en 'reportes/reporte_precios.xlsx'.
+
+        Returns:
+            str: Ruta absoluta al archivo Excel generado.
+        """
+        import openpyxl
+        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+        from openpyxl.utils import get_column_letter
+
+        if ruta_excel is None:
+            directorio_base = os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "..", "reportes")
+            )
+            os.makedirs(directorio_base, exist_ok=True)
+            ruta_excel = os.path.join(directorio_base, "reporte_precios.xlsx")
+        else:
+            directorio_destino = os.path.dirname(os.path.abspath(ruta_excel))
+            if directorio_destino:
+                os.makedirs(directorio_destino, exist_ok=True)
+
+        # Si no se suministraron comparaciones, cargar desde alertas_precios.csv o catálogo
+        if not comparaciones:
+            directorio_base = os.path.dirname(os.path.abspath(ruta_excel))
+            ruta_csv_alertas = os.path.join(directorio_base, "alertas_precios.csv")
+            if os.path.exists(ruta_csv_alertas):
+                comparaciones = []
+                with open(ruta_csv_alertas, mode="r", encoding="utf-8") as f:
+                    lector = csv.DictReader(f)
+                    for fila in lector:
+                        p_int_raw = fila.get("precio_interno")
+                        p_web_raw = fila.get("precio_web")
+                        dif_raw = fila.get("diferencia")
+                        try:
+                            p_int = float(p_int_raw) if p_int_raw not in (None, "", "N/D") else None
+                        except ValueError:
+                            p_int = None
+                        try:
+                            p_web = float(p_web_raw) if p_web_raw not in (None, "", "N/D") else None
+                        except ValueError:
+                            p_web = None
+                        try:
+                            dif = float(dif_raw) if dif_raw not in (None, "", "N/D") else 0.0
+                        except ValueError:
+                            dif = 0.0
+                        comparaciones.append({
+                            "titulo_interno": fila.get("titulo_interno") or fila.get("titulo_competidor") or "Desconocido",
+                            "precio_interno": p_int,
+                            "precio_web": p_web,
+                            "diferencia": dif,
+                            "fecha_extraccion": fila.get("fecha_extraccion") or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        })
+            else:
+                libros = self._libro_service.listar_todos()
+                items_mock = []
+                for lib in libros:
+                    items_mock.append({
+                        "titulo_interno": lib.titulo,
+                        "titulo_competidor": f"{lib.titulo.upper()} - {lib.autor.upper()}",
+                        "precio": None,
+                        "fecha_extraccion": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    })
+                comparaciones = self.comparar_precios(items_mock)
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Reporte de Precios"
+        ws.views.sheetView[0].showGridLines = True
+
+        # Encabezado del reporte
+        ws.merge_cells("A1:E1")
+        celda_titulo = ws["A1"]
+        celda_titulo.value = "BOOK MANAGER - REPORTE DE PRECIOS Y COMPETENCIA (CÚSPIDE)"
+        celda_titulo.font = Font(name="Calibri", size=13, bold=True, color="1F497D")
+        celda_titulo.alignment = Alignment(horizontal="left", vertical="center")
+        ws.row_dimensions[1].height = 24
+
+        ws.merge_cells("A2:E2")
+        celda_subtitulo = ws["A2"]
+        celda_subtitulo.value = (
+            f"Generado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
+            f"Total registros: {len(comparaciones)} | Fuente: Cúspide Libros Online"
+        )
+        celda_subtitulo.font = Font(name="Calibri", size=9, italic=True, color="595959")
+        celda_subtitulo.alignment = Alignment(horizontal="left", vertical="center")
+        ws.row_dimensions[2].height = 18
+
+        ws.row_dimensions[3].height = 8
+
+        # Fila 4: Columnas oficiales del Ejercicio 05
+        columnas = [
+            "Libro",
+            "Precio interno",
+            "Precio web",
+            "Diferencia",
+            "Fecha de extracción",
+        ]
+        ws.row_dimensions[4].height = 24
+
+        fuente_encabezado = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+        relleno_encabezado = PatternFill(start_color="1F497D", end_color="1F497D", fill_type="solid")
+        alineacion_encabezado = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+        borde_fino = Border(
+            left=Side(style="thin", color="D9D9D9"),
+            right=Side(style="thin", color="D9D9D9"),
+            top=Side(style="thin", color="D9D9D9"),
+            bottom=Side(style="thin", color="D9D9D9"),
+        )
+
+        for col_idx, nom_col in enumerate(columnas, start=1):
+            c = ws.cell(row=4, column=col_idx, value=nom_col)
+            c.font = fuente_encabezado
+            c.fill = relleno_encabezado
+            c.alignment = alineacion_encabezado
+            c.border = borde_fino
+
+        fuente_dato = Font(name="Calibri", size=10)
+        relleno_par = PatternFill(start_color="F2F5F9", end_color="F2F5F9", fill_type="solid")
+        relleno_impar = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+
+        formato_moneda = "$#,##0.00"
+        formato_dif = "$#,##0.00;[Red]($#,##0.00);\"$0.00\""
+
+        fila_inicio = 5
+        for i, comp in enumerate(comparaciones, start=fila_inicio):
+            titulo_libro = comp.get("titulo_interno") or comp.get("titulo_competidor") or "Desconocido"
+            p_int = comp.get("precio_interno")
+            p_web = comp.get("precio_web")
+            dif = comp.get("diferencia")
+            fecha_ext = str(comp.get("fecha_extraccion") or datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+            c_libro = ws.cell(row=i, column=1, value=titulo_libro)
+            c_libro.alignment = Alignment(horizontal="left", vertical="center")
+
+            c_pint = ws.cell(row=i, column=2, value=p_int if p_int is not None else "N/D")
+            c_pint.alignment = Alignment(horizontal="right", vertical="center")
+            if isinstance(p_int, (int, float)):
+                c_pint.number_format = formato_moneda
+
+            c_pweb = ws.cell(row=i, column=3, value=p_web if p_web is not None else "N/D")
+            c_pweb.alignment = Alignment(horizontal="right", vertical="center")
+            if isinstance(p_web, (int, float)):
+                c_pweb.number_format = formato_moneda
+
+            c_dif = ws.cell(row=i, column=4, value=dif if dif is not None else 0.0)
+            c_dif.alignment = Alignment(horizontal="right", vertical="center")
+            if isinstance(dif, (int, float)):
+                c_dif.number_format = formato_dif
+
+            c_fecha = ws.cell(row=i, column=5, value=fecha_ext)
+            c_fecha.alignment = Alignment(horizontal="center", vertical="center")
+
+            relleno_actual = relleno_par if (i % 2 == 0) else relleno_impar
+            for col_idx in range(1, 6):
+                celda = ws.cell(row=i, column=col_idx)
+                celda.font = fuente_dato
+                celda.fill = relleno_actual
+                celda.border = borde_fino
+
+            ws.row_dimensions[i].height = 20
+
+        fila_fin = fila_inicio + len(comparaciones) - 1
+        fila_total = fila_fin + 1
+        if len(comparaciones) > 0:
+            c_tot_lbl = ws.cell(row=fila_total, column=1, value="PROMEDIO GENERAL")
+            c_tot_lbl.font = Font(name="Calibri", size=10, bold=True, color="1F497D")
+            c_tot_lbl.alignment = Alignment(horizontal="left", vertical="center")
+
+            c_tot_pint = ws.cell(row=fila_total, column=2, value=f"=AVERAGE(B{fila_inicio}:B{fila_fin})")
+            c_tot_pint.font = Font(name="Calibri", size=10, bold=True, color="1F497D")
+            c_tot_pint.number_format = formato_moneda
+            c_tot_pint.alignment = Alignment(horizontal="right", vertical="center")
+
+            c_tot_pweb = ws.cell(row=fila_total, column=3, value=f"=AVERAGE(C{fila_inicio}:C{fila_fin})")
+            c_tot_pweb.font = Font(name="Calibri", size=10, bold=True, color="1F497D")
+            c_tot_pweb.number_format = formato_moneda
+            c_tot_pweb.alignment = Alignment(horizontal="right", vertical="center")
+
+            c_tot_dif = ws.cell(row=fila_total, column=4, value=f"=AVERAGE(D{fila_inicio}:D{fila_fin})")
+            c_tot_dif.font = Font(name="Calibri", size=10, bold=True, color="1F497D")
+            c_tot_dif.number_format = formato_dif
+            c_tot_dif.alignment = Alignment(horizontal="right", vertical="center")
+
+            c_tot_fec = ws.cell(row=fila_total, column=5, value=f"Total: {len(comparaciones)} títulos")
+            c_tot_fec.font = Font(name="Calibri", size=9, bold=True, italic=True, color="595959")
+            c_tot_fec.alignment = Alignment(horizontal="center", vertical="center")
+
+            borde_total = Border(
+                top=Side(style="thin", color="1F497D"),
+                bottom=Side(style="double", color="1F497D"),
+                left=Side(style="thin", color="D9D9D9"),
+                right=Side(style="thin", color="D9D9D9"),
+            )
+            relleno_total = PatternFill(start_color="E9EEF4", end_color="E9EEF4", fill_type="solid")
+
+            for col_idx in range(1, 6):
+                celda = ws.cell(row=fila_total, column=col_idx)
+                celda.fill = relleno_total
+                celda.border = borde_total
+
+            ws.row_dimensions[fila_total].height = 22
+
+        anchos_minimos = {1: 32, 2: 16, 3: 16, 4: 16, 5: 22}
+        for col_idx in range(1, 6):
+            col_letter = get_column_letter(col_idx)
+            max_len = 0
+            for row_idx in range(4, ws.max_row + 1):
+                val = ws.cell(row=row_idx, column=col_idx).value
+                if val is not None:
+                    val_str = str(val)
+                    if not val_str.startswith("="):
+                        max_len = max(max_len, len(val_str))
+            ancho_final = max(max_len + 3, anchos_minimos.get(col_idx, 15))
+            ws.column_dimensions[col_letter].width = ancho_final
+
+        wb.save(ruta_excel)
+        return os.path.abspath(ruta_excel)
+
 
 class BookManagerService:
     """Coordinador central que implementa inyección de dependencias modular.
@@ -966,6 +1233,10 @@ class BookManagerService:
             self.cotizacion_service,
             self.tipo_cotizacion_service,
         )
+        self.comparador_service = ComparadorPreciosService(
+            self.libro_service,
+            self.precio_service,
+        )
         self.reporte_service = ReporteService(
             self.libro_service,
             self.stock_service,
@@ -974,8 +1245,5 @@ class BookManagerService:
             self.editorial_service,
             self.cotizacion_service,
             self.tipo_cotizacion_service,
-        )
-        self.comparador_service = ComparadorPreciosService(
-            self.libro_service,
-            self.precio_service,
+            self.comparador_service,
         )
