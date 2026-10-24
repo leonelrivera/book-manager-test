@@ -15,6 +15,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -246,6 +247,9 @@ class CotizacionDolarModel(Base):
     """
 
     __tablename__ = "cotizaciones"
+    __table_args__ = (
+        UniqueConstraint("id_tipo", "fecha", name="uq_cotizacion_tipo_fecha"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     fecha: Mapped[date] = mapped_column(Date, nullable=False)

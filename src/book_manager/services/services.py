@@ -249,21 +249,40 @@ class CotizacionService:
     def obtener_cotizaciones(self) -> List[CotizacionDolar]:
         """Busca, descarga y registra las cotizaciones actuales desde la API externa (DolarAPI).
 
-        Lee la URL del endpoint desde la variable de entorno API_URL (.env) y actualiza
-        la base de datos con las cotizaciones más recientes de cada casa de cambio.
+        Lee la URL del endpoint exclusivamente desde la variable de entorno API_URL (.env)
+        y actualiza la base de datos con las cotizaciones más recientes de cada casa de cambio.
+        Distingue y gestiona errores específicos de red (Timeout, ConnectionError, HTTPError, RequestException).
 
         Returns:
             List[CotizacionDolar]: Lista de cotizaciones registradas/actualizadas.
         """
         load_dotenv()
-        api_url = os.getenv("API_URL", "https://dolarapi.com/v1/dolares")
+        api_url = os.getenv("API_URL")
+        if not api_url:
+            print("❌ Error de configuración: La variable de entorno API_URL no está definida en el archivo .env.")
+            return []
 
         try:
             respuesta = requests.get(api_url, timeout=10)
             respuesta.raise_for_status()
             datos = respuesta.json()
+        except requests.exceptions.Timeout as e:
+            print(f"⏳ Tiempo de espera agotado al conectar con la API de cotizaciones ({api_url}): {e}")
+            return []
+        except requests.exceptions.ConnectionError as e:
+            print(f"🔌 Error de conexión de red al conectar con la API de cotizaciones ({api_url}): {e}")
+            return []
+        except requests.exceptions.HTTPError as e:
+            print(f"🚫 Error de estado HTTP al consultar la API de cotizaciones ({api_url}): {e}")
+            return []
+        except requests.exceptions.RequestException as e:
+            print(f"⚠️ Error en la solicitud hacia la API de cotizaciones ({api_url}): {e}")
+            return []
+        except ValueError as e:
+            print(f"❌ Error al decodificar la respuesta JSON de la API ({api_url}): {e}")
+            return []
         except Exception as e:
-            print(f"⚠️ Error al conectar con la API de cotizaciones ({api_url}): {e}")
+            print(f"❌ Error inesperado durante la obtención de cotizaciones ({api_url}): {e}")
             return []
 
         cotizaciones_registradas: List[CotizacionDolar] = []
