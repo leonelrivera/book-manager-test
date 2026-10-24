@@ -1,3 +1,15 @@
+[Ejercicio 4]
+* Implementación del servicio de comparación de precios y generación de alertas de mercado (`ComparadorPreciosService`) en `src/book_manager/services/services.py`:
+  - Comparación sistemática entre el precio interno del catálogo (en Pesos Argentinos - ARS) y el precio extraído desde la web del competidor (Cúspide Libros).
+  - Cálculo de diferencias nominales y porcentuales entre precios, determinando el tipo de alerta (`COMPETIDOR MÁS CARO`, `COMPETIDOR MÁS BARATO`, `PRECIOS IGUALES`, `SIN PRECIO INTERNO`, `SIN PRECIO WEB`).
+  - Activación de alertas de precio en función de un umbral mínimo de diferencia configurable, solicitado al usuario antes de cada ejecución del proceso.
+  - Generación automática de archivo descargable en formato CSV (`src/book_manager/reportes/alertas_precios.csv`) con columnas estructuradas para análisis analítico (`isbn`, `titulo_interno`, `titulo_competidor`, `precio_interno`, `precio_web`, `diferencia`, `diferencia_porcentual`, `alerta_activa`, `tipo_alerta`, `detalle_alerta`, `formas_pago`, `url_libro`, `fecha_extraccion`).
+* Integración del flujo de comparación y alertas en la interfaz de consola `ConsolaUI` (`src/book_manager/ui/console.py`):
+  - Solicitud interactiva del umbral de diferencia de precios al usuario previa a la ejecución del scraper.
+  - Presentación en consola de tabla comparativa con formato de columnas, diferencias porcentuales y estados de alerta destacados.
+  - Incorporación de la opción de ejecución de scraping y alertas tanto en el Menú Principal (opción 13) como en el Menú de Reportes (opción 6).
+* Integración de `ComparadorPreciosService` en el coordinador central `BookManagerService` mediante inyección de dependencias.
+
 [Ejercicio 3]
 * Implementación del spider `CuspideSpider` (`src/book_manager/scraper/spiders/cuspide_spider.py`) utilizando el framework Scrapy:
   - Extracción automatizada desde el catálogo web de Cúspide Libros (WooCommerce) de los campos requeridos: precio actual, URL de la imagen de portada, formas de pago y cuotas, y descripción detallada/sinopsis.

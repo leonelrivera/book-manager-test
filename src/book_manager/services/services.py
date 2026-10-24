@@ -5,6 +5,7 @@ conversión de divisas, gestión de stock, orquestación de operaciones CRUD,
 integración con APIs externas (DolarAPI) y generación de reportes analíticos.
 """
 
+import csv
 from datetime import date, datetime
 import os
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -694,6 +695,234 @@ class ReporteService:
         return distribucion
 
 
+class ComparadorPreciosService:
+    """Servicio de lógica de negocio para la comparación de precios internos vs competencia (Cúspide).
+
+    Implementa el contraste entre precios internos del catálogo y los precios
+    extraídos mediante web scraping, evaluando umbrales de diferencia ingresados
+    por el usuario y generando reportes de alertas en formato CSV descargable.
+    """
+
+    def __init__(self, libro_service: LibroService, precio_service: PrecioService) -> None:
+        """Inicializa el comparador de precios vinculando los servicios de libros y precios.
+
+        Args:
+            libro_service: Servicio de libros para consulta de catálogo.
+            precio_service: Servicio de precios para consulta de valores internos en ARS.
+        """
+        self._libro_service = libro_service
+        self._precio_service = precio_service
+
+    def comparar_precios(
+        self,
+        items_scraped: List[Dict[str, Any]],
+        umbral_diferencia: float = 0.0,
+    ) -> List[Dict[str, Any]]:
+        """Compara los precios extraídos de la web contra el catálogo interno.
+
+        Args:
+            items_scraped: Lista de diccionarios de ítems obtenidos por CuspideSpider.
+            umbral_diferencia: Valor mínimo en ARS de discrepancia de precio para
+                generar una alerta (ingresado por el usuario). Por defecto 0.0.
+
+        Returns:
+            List[Dict[str, Any]]: Lista de registros de comparación con estado de alerta.
+        """
+        comparaciones: List[Dict[str, Any]] = []
+        umbral = float(abs(umbral_diferencia))
+
+        # Crear un mapa rápido de libros propios indexados por título normalizado
+        libros_propios = self._libro_service.listar_todos()
+        mapa_libros: Dict[str, Libro] = {
+            lib.titulo.strip().lower(): lib for lib in libros_propios if lib.titulo
+        }
+
+        for item in items_scraped:
+            titulo_int = str(item.get("titulo_interno", "")).strip()
+            titulo_comp = str(item.get("titulo_competidor", "")).strip()
+            precio_web = float(item["precio"]) if item.get("precio") is not None else None
+            url_img = item.get("url_imagen", "")
+            formas_pago = item.get("formas_pago", "")
+            url_libro = item.get("url_libro", "")
+            fecha_ext = item.get("fecha_extraccion", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+            # Buscar libro correspondiente en catálogo interno
+            libro_obj = mapa_libros.get(titulo_int.lower())
+            if not libro_obj:
+                for clave, l in mapa_libros.items():
+                    if clave in titulo_int.lower() or titulo_int.lower() in clave:
+                        libro_obj = l
+                        break
+
+            isbn = libro_obj.isbn if libro_obj else "N/D"
+            id_libro = libro_obj.id if libro_obj else None
+
+            # Obtener precio interno en Pesos Argentinos (id_moneda=1)
+            precio_interno: Optional[float] = None
+            if id_libro is not None:
+                p_obj = self._precio_service.obtener_precio_por_libro_y_moneda(id_libro, id_moneda=1)
+                if p_obj and p_obj.valor is not None:
+                    precio_interno = float(p_obj.valor)
+
+            # Cálculo de diferencias y determinación del tipo de alerta
+            if precio_web is not None and precio_interno is not None:
+                diferencia = round(precio_web - precio_interno, 2)
+                diferencia_abs = abs(diferencia)
+                porcentaje = (
+                    round((diferencia / precio_interno) * 100, 2) if precio_interno > 0 else 0.0
+                )
+
+                if diferencia < 0:
+                    tipo_alerta = "COMPETIDOR MÁS BARATO"
+                    detalle = f"Cúspide vende ${diferencia_abs:,.2f} ({abs(porcentaje)}%) por debajo del precio interno"
+                elif diferencia > 0:
+                    tipo_alerta = "COMPETIDOR MÁS CARO"
+                    detalle = f"Cúspide vende ${diferencia:,.2f} (+{porcentaje}%) por encima del precio interno"
+                else:
+                    tipo_alerta = "PRECIOS IGUALES"
+                    detalle = "El precio de Cúspide coincide exactamente con el precio interno"
+
+                alerta_activa = diferencia_abs >= umbral
+            else:
+                diferencia = 0.0
+                diferencia_abs = 0.0
+                porcentaje = 0.0
+                if precio_interno is None and precio_web is not None:
+                    tipo_alerta = "SIN PRECIO INTERNO"
+                    detalle = "El libro no tiene precio asignado en el catálogo interno"
+                elif precio_web is None and precio_interno is not None:
+                    tipo_alerta = "SIN PRECIO WEB"
+                    detalle = "No se pudo extraer precio web desde Cúspide"
+                else:
+                    tipo_alerta = "SIN PRECIOS"
+                    detalle = "Sin precio interno ni web disponible"
+                alerta_activa = True
+
+            registro: Dict[str, Any] = {
+                "id_libro": id_libro,
+                "isbn": isbn,
+                "titulo_interno": titulo_int or (libro_obj.titulo if libro_obj else "Desconocido"),
+                "titulo_competidor": titulo_comp,
+                "precio_interno": precio_interno,
+                "precio_web": precio_web,
+                "diferencia": diferencia,
+                "diferencia_abs": diferencia_abs,
+                "diferencia_porcentual": porcentaje,
+                "tipo_alerta": tipo_alerta,
+                "detalle_alerta": detalle,
+                "alerta_activa": alerta_activa,
+                "formas_pago": formas_pago,
+                "url_imagen": url_img,
+                "url_libro": url_libro,
+                "fecha_extraccion": fecha_ext,
+            }
+            comparaciones.append(registro)
+
+        return comparaciones
+
+    def generar_alertas_csv(
+        self,
+        alertas: List[Dict[str, Any]],
+        ruta_csv: Optional[str] = None,
+        solo_alertas_activas: bool = False,
+    ) -> str:
+        """Genera un archivo CSV con las alertas de precios para su descarga y análisis.
+
+        Args:
+            alertas: Lista de diccionarios generados por comparar_precios.
+            ruta_csv: Ruta opcional de destino. Por defecto se guarda en 'reportes/alertas_precios.csv'.
+            solo_alertas_activas: Si es True, filtra únicamente registros con alerta_activa=True.
+
+        Returns:
+            str: Ruta absoluta al archivo CSV generado.
+        """
+        if ruta_csv is None:
+            directorio_base = os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "..", "reportes")
+            )
+            os.makedirs(directorio_base, exist_ok=True)
+            ruta_csv = os.path.join(directorio_base, "alertas_precios.csv")
+        else:
+            directorio_destino = os.path.dirname(os.path.abspath(ruta_csv))
+            if directorio_destino:
+                os.makedirs(directorio_destino, exist_ok=True)
+
+        campos = [
+            "isbn",
+            "titulo_interno",
+            "titulo_competidor",
+            "precio_interno",
+            "precio_web",
+            "diferencia",
+            "diferencia_porcentual",
+            "alerta_activa",
+            "tipo_alerta",
+            "detalle_alerta",
+            "formas_pago",
+            "url_libro",
+            "fecha_extraccion",
+        ]
+
+        filas_a_escribir = [
+            a for a in alertas if (not solo_alertas_activas or a.get("alerta_activa", False))
+        ] if alertas else []
+
+        with open(ruta_csv, mode="w", encoding="utf-8", newline="") as f:
+            escritor = csv.DictWriter(f, fieldnames=campos, extrasaction="ignore")
+            escritor.writeheader()
+            for fila in filas_a_escribir:
+                fila_csv = dict(fila)
+                fila_csv["alerta_activa"] = "SÍ" if fila.get("alerta_activa") else "NO"
+                p_int = fila_csv.get("precio_interno")
+                fila_csv["precio_interno"] = f"{p_int:.2f}" if p_int is not None else "N/D"
+                p_web = fila_csv.get("precio_web")
+                fila_csv["precio_web"] = f"{p_web:.2f}" if p_web is not None else "N/D"
+                dif = fila_csv.get("diferencia")
+                fila_csv["diferencia"] = f"{dif:.2f}" if dif is not None else "0.00"
+                dif_pct = fila_csv.get("diferencia_porcentual")
+                fila_csv["diferencia_porcentual"] = f"{dif_pct:.2f}%" if dif_pct is not None else "0.00%"
+                escritor.writerow(fila_csv)
+
+        return os.path.abspath(ruta_csv)
+
+    def ejecutar_scraping_y_alertas(
+        self,
+        umbral_diferencia: float = 0.0,
+        libros: Optional[List[str]] = None,
+        ruta_csv: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Ejecuta el scraper de Cúspide y genera automáticamente el CSV de alertas.
+
+        Args:
+            umbral_diferencia: Diferencia mínima requerida para generar alertas.
+            libros: Lista opcional de títulos de libros a scrapear.
+            ruta_csv: Ruta opcional para guardar el archivo CSV de alertas.
+
+        Returns:
+            Dict[str, Any]: Resumen con total extraído, total alertas y ruta del CSV.
+        """
+        from book_manager.scraper.runner import ejecutar_scraper
+
+        print(f"🕷️ Iniciando scraping de competidor (Cúspide) con umbral de diferencia: ${umbral_diferencia:,.2f}...")
+        items_scraped = ejecutar_scraper(libros=libros)
+        print(f"📦 Scraping finalizado. {len(items_scraped)} registros obtenidos de Cúspide.")
+
+        alertas = self.comparar_precios(items_scraped, umbral_diferencia=umbral_diferencia)
+        ruta_generada = self.generar_alertas_csv(alertas, ruta_csv=ruta_csv)
+
+        total_activas = sum(1 for a in alertas if a.get("alerta_activa", False))
+        print(f"⚠️ Comparación completada: {total_activas} alertas activas detectadas.")
+        print(f"📄 Archivo CSV de alertas disponible en: {ruta_generada}")
+
+        return {
+            "items_scraped": items_scraped,
+            "alertas": alertas,
+            "total_extraidos": len(items_scraped),
+            "total_alertas": total_activas,
+            "archivo_csv": ruta_generada,
+        }
+
+
 class BookManagerService:
     """Coordinador central que implementa inyección de dependencias modular.
 
@@ -745,4 +974,8 @@ class BookManagerService:
             self.editorial_service,
             self.cotizacion_service,
             self.tipo_cotizacion_service,
+        )
+        self.comparador_service = ComparadorPreciosService(
+            self.libro_service,
+            self.precio_service,
         )

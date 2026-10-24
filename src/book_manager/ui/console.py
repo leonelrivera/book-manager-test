@@ -436,6 +436,66 @@ class ConsolaUI:
         return ruta_destino
 
     # ---------------------------------------------------------
+    # SPRINT 3: SCRAPING Y ALERTAS DE PRECIOS
+    # ---------------------------------------------------------
+    def ejecutar_scraping_y_alertas(
+        self,
+        umbral_diferencia: Optional[float] = None,
+        libros: Optional[List[str]] = None,
+        ruta_csv: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Solicita el umbral de diferencia, ejecuta el scraper de Cúspide y genera alertas en CSV.
+
+        Args:
+            umbral_diferencia: Diferencia mínima requerida para activar alerta. Si es None, se solicita al usuario.
+            libros: Lista opcional de títulos a buscar. Si es None, se usan los libros del catálogo interno.
+            ruta_csv: Ruta opcional de destino para el archivo CSV.
+
+        Returns:
+            Dict[str, Any]: Resumen con items scrapeados, alertas y ruta del CSV.
+        """
+        self.imprimir_encabezado("SCRAPING WEB Y ALERTAS DE PRECIOS (CÚSPIDE)")
+
+        if umbral_diferencia is None:
+            entrada = input("Ingrese la diferencia mínima de precios para generar alertas [$] (ej. 500.0, def: 0.0): ").strip()
+            try:
+                umbral_diferencia = float(entrada) if entrada else 0.0
+            except ValueError:
+                print("⚠️ Valor inválido. Se utilizará umbral por defecto: $0.00")
+                umbral_diferencia = 0.0
+
+        resultado = self.bm.comparador_service.ejecutar_scraping_y_alertas(
+            umbral_diferencia=umbral_diferencia,
+            libros=libros,
+            ruta_csv=ruta_csv,
+        )
+
+        alertas = resultado.get("alertas", [])
+        self.imprimir_encabezado(f"COMPARATIVA DE PRECIOS (Umbral Alerta: ${umbral_diferencia:,.2f})")
+        if not alertas:
+            print("No se obtuvieron registros del scraping para comparar.")
+            return resultado
+
+        print(f"{'TÍTULO INTERNO':<22} | {'PRECIO INT':<11} | {'PRECIO WEB':<11} | {'DIFERENCIA':<12} | {'% DIF':<8} | {'ALERTA'}")
+        self.imprimir_separador(longitud=85)
+        for a in alertas:
+            t_int = (a.get("titulo_interno") or "Desconocido")[:20]
+            p_int = f"${a['precio_interno']:,.2f}" if a.get("precio_interno") is not None else "N/D"
+            p_web = f"${a['precio_web']:,.2f}" if a.get("precio_web") is not None else "N/D"
+            dif = f"${a['diferencia']:+,.2f}" if a.get("precio_interno") is not None and a.get("precio_web") is not None else "-"
+            dif_pct = f"{a['diferencia_porcentual']:+.1f}%" if a.get("precio_interno") is not None and a.get("precio_web") is not None else "-"
+
+            alerta_str = f"🔔 {a['tipo_alerta']}" if a.get("alerta_activa") else f"✅ {a['tipo_alerta']}"
+            print(f"{t_int:<22} | {p_int:<11} | {p_web:<11} | {dif:<12} | {dif_pct:<8} | {alerta_str}")
+
+        self.imprimir_separador(longitud=85)
+        print(f"📦 Total productos analizados: {resultado['total_extraidos']}")
+        print(f"⚠️ Alertas activas detectadas:  {resultado['total_alertas']}")
+        print(f"📄 Archivo CSV generado en:    {resultado['archivo_csv']}")
+        print("💡 Puede descargar el archivo CSV para su análisis detallado o importación en hojas de cálculo.")
+        return resultado
+
+    # ---------------------------------------------------------
     # REPORTES ANALÍTICOS
     # ---------------------------------------------------------
     def mostrar_reporte_catalogo(self, tipo_dolar: str = "Blue") -> None:
@@ -605,7 +665,7 @@ class ConsolaUI:
     def iniciar_menu_interactivo(self) -> None:
         """Menú principal interactivo de consola utilizando coincidencia de patrones (match-case)."""
         while True:
-            self.imprimir_encabezado("BOOK MANAGER - MENÚ PRINCIPAL (SPRINT 2)")
+            self.imprimir_encabezado("BOOK MANAGER - MENÚ PRINCIPAL (SPRINT 3)")
             print("1. 📚 Catálogo y Gestión de Libros")
             print("2. 🏷️  Géneros Literarios")
             print("3. 🏢 Editoriales y Distribuidoras")
@@ -618,6 +678,7 @@ class ConsolaUI:
             print("10. 💾 Exportar Lista de Precios a CSV")
             print("11. 📊 Menú de Reportes Analíticos")
             print("12. 🚀 Ejecutar Demostración Completa (Auto-Check)")
+            print("13. 🕷️ Ejecutar Scraping Web y Alertas de Precios (Cúspide CSV)")
             print("0. 🚪 Salir del Sistema")
             self.imprimir_separador()
 
@@ -650,6 +711,8 @@ class ConsolaUI:
                     self._menu_reportes()
                 case "12":
                     self.ejecutar_demostracion_completa()
+                case "13":
+                    self.ejecutar_scraping_y_alertas()
                 case "0" | "salir" | "exit" | "q":
                     print("\n👋 ¡Gracias por utilizar Book Manager! Hasta luego.\n")
                     break
@@ -917,6 +980,7 @@ class ConsolaUI:
             print("3. ⚠️  Reporte: Alertas de Stock Crítico")
             print("4. 📊 Reporte: Distribución de Títulos por Género")
             print("5. 💱 Reporte: Lista de Precios Bimonetaria")
+            print("6. 🕷️ Scraping de Competencia y Alertas de Precios (Cúspide CSV)")
             print("0. Volver al menú principal")
             self.imprimir_separador()
             op = input("Seleccione un reporte: ").strip()
@@ -935,6 +999,8 @@ class ConsolaUI:
                     self.mostrar_reporte_generos()
                 case "5":
                     self.ver_precios_bimonetarios()
+                case "6":
+                    self.ejecutar_scraping_y_alertas()
                 case "0":
                     break
                 case _:
