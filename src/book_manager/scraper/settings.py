@@ -4,6 +4,14 @@ Establece las directivas de ejecución, identificación de agente de usuario,
 políticas de descarga y módulos de spiders y pipelines.
 """
 
+import os
+import sys
+
+# Asegurar que el directorio src/ esté en el path de búsqueda de módulos de Python
+_SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
+
 BOT_NAME = "book_manager_scraper"
 
 SPIDER_MODULES = ["book_manager.scraper.spiders"]
@@ -32,7 +40,8 @@ FEED_EXPORT_ENCODING = "utf-8"
 REQUEST_FINGERPRINTER_IMPLEMENTATION = "2.7"
 TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
 
-# Configuración de pipelines activos
+# Configuración de pipelines activos (validación y almacenamiento en memoria)
 ITEM_PIPELINES = {
     "book_manager.scraper.pipelines.ValidacionLibroPipeline": 300,
+    "book_manager.scraper.pipelines.AlmacenamientoItemsPipeline": 400,
 }

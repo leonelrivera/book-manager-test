@@ -5,9 +5,9 @@ web antes de ser asignados al ítem estructurado.
 """
 
 import re
-from typing import Optional
+from typing import Any, Optional
 from itemloaders import ItemLoader
-from itemloaders.processors import MapCompose, TakeFirst
+from itemloaders.processors import Join, MapCompose, TakeFirst
 
 from book_manager.scraper.items import LibroCompetidorItem
 
@@ -63,7 +63,11 @@ class LibroCompetidorLoader(ItemLoader):
     precio_in = MapCompose(normalizar_precio)
     precio_texto_in = MapCompose(limpiar_texto)
     url_imagen_in = MapCompose(limpiar_texto)
-    formas_pago_in = MapCompose(limpiar_texto)
-    descripcion_in = MapCompose(limpiar_texto)
     url_libro_in = MapCompose(limpiar_texto)
     fecha_extraccion_in = MapCompose(limpiar_texto)
+
+    descripcion_in = MapCompose(limpiar_texto)
+    descripcion_out = Join(" ")
+
+    formas_pago_in = MapCompose(limpiar_texto)
+    formas_pago_out = Join(" | ")
