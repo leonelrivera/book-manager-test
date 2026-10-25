@@ -1,3 +1,31 @@
+[Ejercicio 6]
+* Implementación integral del sistema de auditoría transversal y decorador `@auditar` (`src/book_manager/services/services.py`):
+  - Creación del decorador flexible `@auditar` (utilizable como `@auditar` o `@auditar("NOMBRE_ACCION")`), interceptando la ejecución de métodos del sistema y registrando la traza completa de la operación.
+  - Registro de los campos exigidos por la consigna:
+    * `acción`: Identificador textual de la operación ejecutada (en mayúsculas o nombre personalizado).
+    * `fecha`: Marca temporal exacta de ejecución (`datetime.now()`).
+    * `detalles`: Resumen formateado con sanitización de argumentos (excluyendo punteros `self`), resultado o identificador retornado y estado de ejecución (`ÉXITO` o `ERROR` con tipo y mensaje de excepción).
+  - Mecanismo de persistencia resiliente `_persistir_auditoria()`: verificación e inicialización automática de la tabla `auditoria` y aislamiento de excepciones para evitar que fallos transaccionales en la auditoría interrumpan la lógica de negocio principal.
+* Creación del modelo ORM `AuditoriaModel` (`src/book_manager/models/models.py`) mapeado a la tabla relacional `auditoria` con columnas `id` (PK SERIAL), `accion` (VARCHAR), `fecha` (TIMESTAMP/DATETIME) y `detalles` (TEXT). Exportado en `src/book_manager/models/__init__.py`.
+* Definición de la entidad de dominio `Auditoria` (`src/book_manager/entities/entities.py`) con getters/setters, serialización a diccionario (`to_dict`/`from_dict`) y alias `RegistroAuditoria`.
+* Implementación de `RepositorioAuditoria` (`src/book_manager/repositories/repositories.py`) heredando de `RepositorioBase`, con creación segura de tabla bajo demanda (`checkfirst=True`), consultas filtradas por acción (`buscar_por_accion()`) y recuperación cronológica de las últimas trazas (`leer_ultimas()`).
+* Creación de `AuditoriaService` e integración en el coordinador central `BookManagerService` con inyección de dependencias (`self.auditoria_service`).
+* Aplicación sistemática del decorador `@auditar` sobre operaciones críticas en todos los servicios de negocio:
+  - `GeneroService`: `crear_genero`, `actualizar_genero`, `eliminar_genero`.
+  - `EditorialService`: `crear_editorial`, `actualizar_editorial`, `eliminar_editorial`.
+  - `MonedaService`: `crear_moneda`, `actualizar_moneda`, `eliminar_moneda`.
+  - `TipoCotizacionService`: `crear_tipo`, `actualizar_tipo`, `eliminar_tipo`.
+  - `CotizacionService`: `registrar_cotizacion`, `eliminar_cotizacion`, `obtener_cotizaciones` (sincronización API).
+  - `StockService`: `registrar_stock_inicial`, `agregar_unidades`, `retirar_unidades`.
+  - `PrecioService`: `fijar_precio`.
+  - `LibroService`: `dar_de_alta_libro`, `actualizar_libro`, `eliminar_libro`.
+  - `ComparadorPreciosService`: `comparar_precios`, `generar_alertas_csv`, `ejecutar_scraping_y_alertas`, `generar_reporte_excel`.
+  - `ReporteService`: `generar_reporte_excel_precios`.
+* Integración en la interfaz de consola `ConsolaUI` (`src/book_manager/ui/console.py`):
+  - Nuevo método `listar_auditorias(limite)` para visualización tabular formateada de eventos de auditoría con columnas `ID`, `FECHA Y HORA`, `ACCIÓN` y `DETALLES`.
+  - Adición de la opción "14. 📋 Registro de Auditorías del Sistema" en el Menú Principal y opción "8. 📋 Registro de Auditorías del Sistema" en el Menú de Reportes Analíticos.
+* Creación del script de migración DDL `src/book_manager/migrations/sql/auditoria.sql` con creación de tabla e índices sobre `fecha` y `accion`.
+
 [Ejercicio 5]
 * Implementación de la generación de reportes analíticos de precios en formato Excel (`.xlsx`) mediante la librería `openpyxl`:
   - Método `generar_reporte_excel()` en `ComparadorPreciosService` y su delegación en `ReporteService.generar_reporte_excel_precios()` dentro de `src/book_manager/services/services.py`.

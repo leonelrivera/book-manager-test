@@ -571,6 +571,31 @@ class ConsolaUI:
         self.imprimir_separador()
 
     # ---------------------------------------------------------
+    # AUDITORÍA DEL SISTEMA
+    # ---------------------------------------------------------
+    def listar_auditorias(self, limite: int = 50) -> None:
+        """Muestra en formato tabular las últimas trazas de auditoría registradas."""
+        self.imprimir_encabezado(f"REGISTRO DE AUDITORÍA DEL SISTEMA (ÚLTIMAS {limite} OPERACIONES)")
+        try:
+            registros = self.bm.auditoria_service.listar_todas(limite=limite)
+        except Exception as e:
+            print(f"⚠️ No fue posible consultar los registros de auditoría: {e}")
+            return
+
+        if not registros:
+            print("ℹ️ No se registran eventos de auditoría en la base de datos.")
+            return
+
+        print(f"{'ID':<5} | {'FECHA Y HORA':<19} | {'ACCIÓN':<28} | {'DETALLES'}")
+        self.imprimir_separador(longitud=100)
+        for r in registros:
+            f_str = r.fecha.strftime("%Y-%m-%d %H:%M:%S") if hasattr(r.fecha, "strftime") else str(r.fecha)
+            detalles_visibles = (r.detalles or "")[:45]
+            print(f"{r.id:<5} | {f_str:<19} | {r.accion[:26]:<28} | {detalles_visibles}")
+        self.imprimir_separador(longitud=100)
+        print(f"Total mostrados: {len(registros)} registros.")
+
+    # ---------------------------------------------------------
     # DEMOSTRACIÓN COMPLETA PARA CHECKS DE EVALUACIÓN
     # ---------------------------------------------------------
     def ejecutar_demostracion_completa(self) -> None:
@@ -708,6 +733,7 @@ class ConsolaUI:
             print("11. 📊 Menú de Reportes Analíticos")
             print("12. 🚀 Ejecutar Demostración Completa (Auto-Check)")
             print("13. 🕷️ Ejecutar Scraping Web y Alertas de Precios (Cúspide CSV)")
+            print("14. 📋 Registro de Auditorías del Sistema (Últimas Operaciones)")
             print("0. 🚪 Salir del Sistema")
             self.imprimir_separador()
 
@@ -742,6 +768,10 @@ class ConsolaUI:
                     self.ejecutar_demostracion_completa()
                 case "13":
                     self.ejecutar_scraping_y_alertas()
+                case "14":
+                    limite_str = input("Cantidad de registros a consultar (def: 50): ").strip()
+                    limite = int(limite_str) if limite_str.isdigit() else 50
+                    self.listar_auditorias(limite=limite)
                 case "0" | "salir" | "exit" | "q":
                     print("\n👋 ¡Gracias por utilizar Book Manager! Hasta luego.\n")
                     break
@@ -1011,6 +1041,7 @@ class ConsolaUI:
             print("5. 💱 Reporte: Lista de Precios Bimonetaria")
             print("6. 🕷️ Scraping de Competencia y Alertas de Precios (Cúspide CSV)")
             print("7. 📑 Generar Reporte de Precios en Excel (.xlsx con openpyxl)")
+            print("8. 📋 Registro de Auditorías del Sistema (Últimas Operaciones)")
             print("0. Volver al menú principal")
             self.imprimir_separador()
             op = input("Seleccione un reporte: ").strip()
@@ -1033,6 +1064,10 @@ class ConsolaUI:
                     self.ejecutar_scraping_y_alertas()
                 case "7":
                     self.generar_reporte_excel_precios()
+                case "8":
+                    limite_str = input("Cantidad de registros a consultar (def: 50): ").strip()
+                    limite = int(limite_str) if limite_str.isdigit() else 50
+                    self.listar_auditorias(limite=limite)
                 case "0":
                     break
                 case _:

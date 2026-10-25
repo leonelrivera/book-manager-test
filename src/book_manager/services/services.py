@@ -7,12 +7,14 @@ integración con APIs externas (DolarAPI) y generación de reportes analíticos.
 
 import csv
 from datetime import date, datetime
+import functools
 import os
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from dotenv import load_dotenv
 import requests
 
 from book_manager.entities.entities import (
+    Auditoria,
     CotizacionDolar,
     Editorial,
     Genero,
@@ -22,7 +24,9 @@ from book_manager.entities.entities import (
     Stock,
     TipoCotizacion,
 )
+from book_manager.models.models import AuditoriaModel
 from book_manager.repositories.repositories import (
+    RepositorioAuditoria,
     RepositorioBase,
     RepositorioCotizacionDolar,
     RepositorioEditorial,
@@ -35,12 +39,138 @@ from book_manager.repositories.repositories import (
 )
 
 
+_tabla_auditoria_verificada = False
+
+
+def _persistir_auditoria(accion: str, fecha: datetime, detalles: str) -> None:
+    """Inserta de manera segura una fila en la tabla de auditoría en la base de datos."""
+    global _tabla_auditoria_verificada
+    try:
+        from book_manager.database.connection import ConexionDB, transaccion_db
+        from book_manager.models.models import Base
+        if not _tabla_auditoria_verificada:
+            try:
+                conexion = ConexionDB()
+                Base.metadata.create_all(
+                    bind=conexion.engine,
+                    tables=[AuditoriaModel.__table__],
+                    checkfirst=True,
+                )
+                _tabla_auditoria_verificada = True
+            except Exception:
+                pass
+
+        with transaccion_db() as session:
+            session.add(AuditoriaModel(
+                accion=accion,
+                fecha=fecha,
+                detalles=detalles,
+            ))
+    except Exception:
+        # Previene que un error transaccional de auditoría interrumpa la operación de negocio
+        pass
+
+
+def auditar(accion_o_func: Optional[Union[str, Callable]] = None) -> Any:
+    """Decorador para registrar automáticamente auditorías de operaciones del sistema.
+
+    Puede usarse con o sin argumentos explícitos:
+        @auditar
+        def crear_libro(self, ...): ...
+
+        @auditar("ALTA_LIBRO")
+        def crear_libro(self, ...): ...
+
+    Registra en la tabla 'auditoria':
+        - acción (accion): Nombre de la acción o nombre del método en mayúsculas
+        - fecha (fecha): Timestamp de ejecución (datetime.now())
+        - detalles (detalles): Parámetros de invocación, resultado obtenido y estado (ÉXITO / ERROR)
+    """
+
+    def decorador(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def envoltura(*args: Any, **kwargs: Any) -> Any:
+            if isinstance(accion_o_func, str):
+                nombre_accion = accion_o_func
+            else:
+                nombre_accion = func.__name__.upper()
+
+            fecha_actual = datetime.now()
+
+            # Sanitización de parámetros excluyendo 'self'
+            args_visibles = args[1:] if len(args) > 0 and hasattr(args[0], "__class__") else args
+            partes = [repr(a)[:60] for a in args_visibles]
+            partes += [f"{k}={repr(v)[:60]}" for k, v in kwargs.items()]
+            params_str = ", ".join(partes) if partes else "ninguno"
+
+            try:
+                resultado = func(*args, **kwargs)
+                detalles_retorno = ""
+                if resultado is not None:
+                    if hasattr(resultado, "id") and resultado.id:
+                        detalles_retorno = f" | Retorno: ID={resultado.id}"
+                    elif isinstance(resultado, (list, tuple)):
+                        detalles_retorno = f" | Retorno: {len(resultado)} elementos"
+                    elif isinstance(resultado, dict):
+                        detalles_retorno = f" | Retorno: dict({len(resultado)} claves)"
+                    else:
+                        detalles_retorno = f" | Retorno: {str(resultado)[:60]}"
+
+                detalles = f"Estado: ÉXITO | Parámetros: {params_str}{detalles_retorno}"
+                _persistir_auditoria(nombre_accion, fecha_actual, detalles)
+                return resultado
+            except Exception as exc:
+                detalles = f"Estado: ERROR ({type(exc).__name__}: {str(exc)}) | Parámetros: {params_str}"
+                _persistir_auditoria(nombre_accion, fecha_actual, detalles)
+                raise
+
+        return envoltura
+
+    if callable(accion_o_func):
+        return decorador(accion_o_func)
+    return decorador
+
+
+class AuditoriaService:
+    """Servicio de lógica de negocio para la consulta y administración de trazas de auditoría."""
+
+    def __init__(self, repo_auditoria: RepositorioAuditoria) -> None:
+        self._repo = repo_auditoria
+
+    def registrar_auditoria(
+        self,
+        accion: str,
+        detalles: str = "",
+        fecha: Optional[datetime] = None,
+    ) -> Auditoria:
+        """Registra explícitamente un evento de auditoría."""
+        nuevo = Auditoria(
+            accion=accion,
+            fecha=fecha or datetime.now(),
+            detalles=detalles,
+        )
+        return self._repo.crear(nuevo)
+
+    def listar_todas(self, limite: int = 100) -> List[Auditoria]:
+        """Obtiene las últimas trazas de auditoría registradas."""
+        return self._repo.leer_ultimas(limite=limite)
+
+    def buscar_por_accion(self, accion: str) -> List[Auditoria]:
+        """Filtra eventos de auditoría por tipo de acción."""
+        return self._repo.buscar_por_accion(accion)
+
+    def obtener_por_id(self, id_auditoria: int) -> Optional[Auditoria]:
+        """Recupera un evento de auditoría por su identificador primario."""
+        return self._repo.leer_por_id(id_auditoria)
+
+
 class GeneroService:
     """Servicio de lógica de negocio para la gestión de Géneros literarios."""
 
     def __init__(self, repo_genero: RepositorioGenero) -> None:
         self._repo = repo_genero
 
+    @auditar("CREAR_GENERO")
     def crear_genero(self, nombre: str, descripcion: str = "", id_genero: Optional[int] = None) -> Genero:
         if self._repo.buscar_por_nombre(nombre) is not None:
             raise ValueError(f"Ya existe un género literario con el nombre '{nombre}'.")
@@ -56,6 +186,7 @@ class GeneroService:
     def listar_todos(self) -> List[Genero]:
         return self._repo.leer_todos()
 
+    @auditar("ACTUALIZAR_GENERO")
     def actualizar_genero(self, id_genero: int, nuevo_nombre: str, nueva_descripcion: str = "") -> Genero:
         genero_existente = self._repo.leer_por_id(id_genero)
         if not genero_existente:
@@ -67,6 +198,7 @@ class GeneroService:
         genero_existente.descripcion = nueva_descripcion
         return self._repo.actualizar(genero_existente)
 
+    @auditar("ELIMINAR_GENERO")
     def eliminar_genero(self, id_genero: int) -> bool:
         return self._repo.eliminar(id_genero)
 
@@ -77,6 +209,7 @@ class EditorialService:
     def __init__(self, repo_editorial: RepositorioEditorial) -> None:
         self._repo = repo_editorial
 
+    @auditar("CREAR_EDITORIAL")
     def crear_editorial(
         self,
         nombre: str,
@@ -98,6 +231,7 @@ class EditorialService:
     def listar_todas(self) -> List[Editorial]:
         return self._repo.leer_todos()
 
+    @auditar("ACTUALIZAR_EDITORIAL")
     def actualizar_editorial(
         self,
         id_editorial: int,
@@ -116,6 +250,7 @@ class EditorialService:
         editorial_existente.contacto = nuevo_contacto
         return self._repo.actualizar(editorial_existente)
 
+    @auditar("ELIMINAR_EDITORIAL")
     def eliminar_editorial(self, id_editorial: int) -> bool:
         return self._repo.eliminar(id_editorial)
 
@@ -126,6 +261,7 @@ class MonedaService:
     def __init__(self, repo_moneda: RepositorioMoneda) -> None:
         self._repo = repo_moneda
 
+    @auditar("CREAR_MONEDA")
     def crear_moneda(
         self,
         codigo: str,
@@ -147,6 +283,7 @@ class MonedaService:
     def listar_todas(self) -> List[Moneda]:
         return self._repo.leer_todos()
 
+    @auditar("ACTUALIZAR_MONEDA")
     def actualizar_moneda(self, id_moneda: int, codigo: str, nombre: str, simbolo: str = "$") -> Moneda:
         moneda = self._repo.leer_por_id(id_moneda)
         if not moneda:
@@ -159,6 +296,7 @@ class MonedaService:
         moneda.simbolo = simbolo
         return self._repo.actualizar(moneda)
 
+    @auditar("ELIMINAR_MONEDA")
     def eliminar_moneda(self, id_moneda: int) -> bool:
         return self._repo.eliminar(id_moneda)
 
@@ -169,6 +307,7 @@ class TipoCotizacionService:
     def __init__(self, repo_tipo: RepositorioTipoCotizacion) -> None:
         self._repo = repo_tipo
 
+    @auditar("CREAR_TIPO_COTIZACION")
     def crear_tipo(self, nombre: str, descripcion: str = "", id_tipo: Optional[int] = None) -> TipoCotizacion:
         if self._repo.buscar_por_nombre(nombre) is not None:
             raise ValueError(f"Ya existe el tipo de cotización '{nombre}'.")
@@ -184,6 +323,7 @@ class TipoCotizacionService:
     def listar_todos(self) -> List[TipoCotizacion]:
         return self._repo.leer_todos()
 
+    @auditar("ACTUALIZAR_TIPO_COTIZACION")
     def actualizar_tipo(self, id_tipo: int, nuevo_nombre: str, nueva_descripcion: str = "") -> TipoCotizacion:
         tipo = self._repo.leer_por_id(id_tipo)
         if not tipo:
@@ -195,6 +335,7 @@ class TipoCotizacionService:
         tipo.descripcion = nueva_descripcion
         return self._repo.actualizar(tipo)
 
+    @auditar("ELIMINAR_TIPO_COTIZACION")
     def eliminar_tipo(self, id_tipo: int) -> bool:
         return self._repo.eliminar(id_tipo)
 
@@ -210,6 +351,7 @@ class CotizacionService:
         self._repo_cotizacion = repo_cotizacion
         self._repo_tipo = repo_tipo
 
+    @auditar("REGISTRAR_COTIZACION")
     def registrar_cotizacion(
         self,
         id_tipo: int,
@@ -244,9 +386,11 @@ class CotizacionService:
     def listar_todas(self) -> List[CotizacionDolar]:
         return self._repo_cotizacion.leer_todos()
 
+    @auditar("ELIMINAR_COTIZACION")
     def eliminar_cotizacion(self, id_tipo: int, fecha: Union[date, str]) -> bool:
         return self._repo_cotizacion.eliminar(id_tipo, fecha)
 
+    @auditar("ACTUALIZAR_COTIZACIONES_API")
     def obtener_cotizaciones(self) -> List[CotizacionDolar]:
         """Busca, descarga y registra las cotizaciones actuales desde la API externa (DolarAPI).
 
@@ -341,6 +485,7 @@ class StockService:
         self._repo_stock = repo_stock
         self._repo_libro = repo_libro
 
+    @auditar("REGISTRAR_STOCK_INICIAL")
     def registrar_stock_inicial(
         self,
         id_libro: int,
@@ -359,6 +504,7 @@ class StockService:
     def obtener_stock_por_libro(self, id_libro: int) -> Optional[Stock]:
         return self._repo_stock.leer_por_libro(id_libro)
 
+    @auditar("AGREGAR_STOCK")
     def agregar_unidades(self, id_libro: int, cantidad: int) -> Stock:
         if cantidad <= 0:
             raise ValueError("La cantidad a ingresar debe ser mayor que cero.")
@@ -368,6 +514,7 @@ class StockService:
         stock.cantidad += cantidad
         return self._repo_stock.actualizar(stock)
 
+    @auditar("RETIRAR_STOCK")
     def retirar_unidades(self, id_libro: int, cantidad: int) -> Stock:
         if cantidad <= 0:
             raise ValueError("La cantidad a retirar debe ser mayor que cero.")
@@ -402,6 +549,7 @@ class PrecioService:
         self._cotizacion_svc = cotizacion_service
         self._tipo_svc = tipo_cotizacion_service
 
+    @auditar("FIJAR_PRECIO")
     def fijar_precio(
         self,
         id_libro: int,
@@ -518,6 +666,7 @@ class LibroService:
         self._repo_genero = repo_genero
         self._repo_editorial = repo_editorial
 
+    @auditar("ALTA_LIBRO")
     def dar_de_alta_libro(
         self,
         isbn: str,
@@ -573,6 +722,7 @@ class LibroService:
     def listar_todos(self) -> List[Libro]:
         return self._repo_libro.leer_todos()
 
+    @auditar("ACTUALIZAR_LIBRO")
     def actualizar_libro(
         self,
         id_libro: int,
@@ -610,6 +760,7 @@ class LibroService:
 
         return self._repo_libro.actualizar(libro_existente)
 
+    @auditar("ELIMINAR_LIBRO")
     def eliminar_libro(self, id_libro: int) -> bool:
         return self._repo_libro.eliminar(id_libro)
 
@@ -637,6 +788,7 @@ class ReporteService:
         self._tipo_svc = tipo_cotizacion_service
         self._comparador_service = comparador_service
 
+    @auditar("REPORTE_EXCEL_PRECIOS")
     def generar_reporte_excel_precios(
         self,
         comparaciones: Optional[List[Dict[str, Any]]] = None,
@@ -743,6 +895,7 @@ class ComparadorPreciosService:
         self._libro_service = libro_service
         self._precio_service = precio_service
 
+    @auditar("COMPARAR_PRECIOS")
     def comparar_precios(
         self,
         items_scraped: List[Dict[str, Any]],
@@ -850,6 +1003,7 @@ class ComparadorPreciosService:
 
         return comparaciones
 
+    @auditar("GENERAR_ALERTAS_CSV")
     def generar_alertas_csv(
         self,
         alertas: List[Dict[str, Any]],
@@ -915,6 +1069,7 @@ class ComparadorPreciosService:
 
         return os.path.abspath(ruta_csv)
 
+    @auditar("SCRAPING_Y_ALERTAS")
     def ejecutar_scraping_y_alertas(
         self,
         umbral_diferencia: float = 0.0,
@@ -952,6 +1107,7 @@ class ComparadorPreciosService:
             "archivo_csv": ruta_generada,
         }
 
+    @auditar("GENERAR_REPORTE_EXCEL")
     def generar_reporte_excel(
         self,
         comparaciones: Optional[List[Dict[str, Any]]] = None,
@@ -1207,6 +1363,7 @@ class BookManagerService:
         repo_precio: Optional[RepositorioPrecio] = None,
         repo_stock: Optional[RepositorioStock] = None,
         repo_cotizacion: Optional[RepositorioCotizacionDolar] = None,
+        repo_auditoria: Optional[RepositorioAuditoria] = None,
     ) -> None:
         # Inicialización de Repositorios con Inyección de Dependencias
         self.repo_libro = repo_libro or RepositorioLibro()
@@ -1217,8 +1374,10 @@ class BookManagerService:
         self.repo_precio = repo_precio or RepositorioPrecio()
         self.repo_stock = repo_stock or RepositorioStock()
         self.repo_cotizacion = repo_cotizacion or RepositorioCotizacionDolar()
+        self.repo_auditoria = repo_auditoria or RepositorioAuditoria()
 
         # Inicialización de Servicios
+        self.auditoria_service = AuditoriaService(self.repo_auditoria)
         self.genero_service = GeneroService(self.repo_genero)
         self.editorial_service = EditorialService(self.repo_editorial)
         self.moneda_service = MonedaService(self.repo_moneda)
