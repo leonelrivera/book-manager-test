@@ -12,7 +12,9 @@ class LibroCompetidorItem(scrapy.Item):
     """Item que representa los datos extraídos de un libro de la competencia."""
 
     titulo_interno = scrapy.Field()      # Título del libro correspondiente en el catálogo propio
+    autor_interno = scrapy.Field()       # Autor correspondiente en el catálogo propio
     titulo_competidor = scrapy.Field()   # Título publicado en el sitio del competidor
+    autor_competidor = scrapy.Field()    # Autor extraído de la publicación del competidor
     precio = scrapy.Field()              # Precio actual (float o numérico normalizado)
     precio_texto = scrapy.Field()        # Precio en texto tal como aparece en la web
     url_imagen = scrapy.Field()          # URL absoluta de la portada del libro

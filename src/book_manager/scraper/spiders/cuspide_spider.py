@@ -34,12 +34,11 @@ class CuspideSpider(scrapy.Spider):
         *args: Any,
         **kwargs: Any,
     ) -> None:
-        """Inicializa la spider con los títulos del catálogo a buscar.
+        """Inicializa la spider con los títulos y autores del catálogo a buscar.
 
         Args:
-            libros: Lista de títulos de libros propios a buscar. Si es None o cadena
-                separada por comas, se cargan automáticamente desde el repositorio
-                o archivo CSV de libros propios.
+            libros: Lista de títulos o diccionarios con info de libros propios a buscar.
+                Si es None, se cargan automáticamente desde el repositorio o archivo CSV.
             max_resultados: Cantidad máxima de resultados por búsqueda (por defecto 10).
             *args: Argumentos posicionales adicionales para Spider.
             **kwargs: Argumentos por palabra clave adicionales para Spider.
@@ -48,17 +47,18 @@ class CuspideSpider(scrapy.Spider):
         self.max_resultados: int = int(max_resultados)
         self.items_scraped: List[Dict[str, Any]] = []
 
-        # Determinar la lista de títulos propios a buscar
-        self.titulos_propios: List[str] = self._obtener_titulos_propios(libros)
+        # Determinar la lista de libros propios con título y autor
+        self.libros_propios: List[Dict[str, str]] = self._obtener_libros_propios(libros)
+        self.titulos_propios: List[str] = [l["titulo"] for l in self.libros_propios]
 
         # Construir URLs iniciales de búsqueda para cada libro del catálogo
         self.start_urls: List[str] = [
-            f"https://cuspide.com/?s={urllib.parse.quote_plus(titulo)}&post_type=product"
-            for titulo in self.titulos_propios
+            f"https://cuspide.com/?s={urllib.parse.quote_plus(l['titulo'])}&post_type=product"
+            for l in self.libros_propios
         ]
 
-    def _obtener_titulos_propios(self, libros: Optional[Any]) -> List[str]:
-        """Obtiene la lista de títulos de libros de nuestro catálogo.
+    def _obtener_libros_propios(self, libros: Optional[Any]) -> List[Dict[str, str]]:
+        """Obtiene la lista de libros (título y autor) de nuestro catálogo.
 
         Garantiza que la spider solo trabaje con los libros de nuestro inventario,
         consultando primero la base de datos y utilizando el archivo CSV como respaldo.
@@ -67,16 +67,24 @@ class CuspideSpider(scrapy.Spider):
             libros: Entrada manual opcional (lista o string separado por comas).
 
         Returns:
-            List[str]: Lista de títulos de libros propios limpios.
+            List[Dict[str, str]]: Lista de diccionarios con 'titulo' y 'autor'.
         """
-        # Si se proveyó una lista explícita
+        # Si se proveyó una lista explícita de diccionarios
+        if isinstance(libros, list) and libros and isinstance(libros[0], dict):
+            return [
+                {"titulo": str(item.get("titulo", "")).strip(), "autor": str(item.get("autor", "")).strip()}
+                for item in libros if str(item.get("titulo", "")).strip()
+            ]
+
+        # Mapa de autor por título si se proveyó lista de strings
+        titulos_filtro: Optional[set] = None
         if isinstance(libros, list):
-            return [str(t).strip() for t in libros if str(t).strip()]
-        if isinstance(libros, str) and libros.strip():
-            return [t.strip() for t in libros.split(",") if t.strip()]
+            titulos_filtro = {str(t).strip().lower() for t in libros if str(t).strip()}
+        elif isinstance(libros, str) and libros.strip():
+            titulos_filtro = {t.strip().lower() for t in libros.split(",") if t.strip()}
 
         # Consultar mediante el repositorio de base de datos
-        titulos: List[str] = []
+        libros_resultado: List[Dict[str, str]] = []
         try:
             from book_manager.database.connection import ConexionDB
             from book_manager.repositories.repositories import RepositorioLibro
@@ -86,9 +94,12 @@ class CuspideSpider(scrapy.Spider):
             libros_db = repo_libro.leer_todos()
             for libro in libros_db:
                 if libro.titulo and libro.titulo.strip():
-                    titulos.append(libro.titulo.strip())
-            if titulos:
-                return titulos
+                    t_limpio = libro.titulo.strip()
+                    a_limpio = libro.autor.strip() if getattr(libro, "autor", None) else ""
+                    if titulos_filtro is None or t_limpio.lower() in titulos_filtro:
+                        libros_resultado.append({"titulo": t_limpio, "autor": a_limpio})
+            if libros_resultado:
+                return libros_resultado
         except Exception:
             pass
 
@@ -106,26 +117,44 @@ class CuspideSpider(scrapy.Spider):
                         lector = csv.DictReader(f)
                         for fila in lector:
                             titulo = fila.get("titulo")
+                            autor = fila.get("autor", "")
                             if titulo and titulo.strip():
-                                titulos.append(titulo.strip())
-                    if titulos:
-                        return titulos
+                                t_limpio = titulo.strip()
+                                a_limpio = autor.strip() if autor else ""
+                                if titulos_filtro is None or t_limpio.lower() in titulos_filtro:
+                                    libros_resultado.append({"titulo": t_limpio, "autor": a_limpio})
+                    if libros_resultado:
+                        return libros_resultado
                 except Exception:
                     pass
 
-        # Si no se pudo obtener ningún libro, utilizar títulos base del catálogo Cúspide
+        # Si no se pudo obtener ningún libro, utilizar títulos y autores base del catálogo
         return [
-            "Rayuela",
-            "Ficciones",
-            "El Aleph",
-            "Cien Años de Soledad",
-            "Sapiens",
-            "El Eternauta",
-            "1984",
-            "Hábitos Atómicos",
-            "Martín Fierro",
-            "Python para Ciencia de Datos",
+            {"titulo": "Rayuela", "autor": "Julio Cortazar"},
+            {"titulo": "Ficciones", "autor": "Jorge Luis Borges"},
+            {"titulo": "El Aleph", "autor": "Jorge Luis Borges"},
+            {"titulo": "Cien Años de Soledad", "autor": "Gabriel Garcia Marquez"},
+            {"titulo": "Sapiens", "autor": "Yuval Noah Harari"},
+            {"titulo": "El Eternauta", "autor": "Hector German Oesterheld"},
+            {"titulo": "1984", "autor": "George Orwell"},
+            {"titulo": "Hábitos Atómicos", "autor": "James Clear"},
+            {"titulo": "Martín Fierro", "autor": "Jose Hernandez"},
+            {"titulo": "Python para Ciencia de Datos", "autor": "Guido van Rossum"},
         ]
+
+    def start_requests(self) -> Generator[Request, None, None]:
+        """Genera las solicitudes iniciales inyectando título y autor propios en meta."""
+        for libro in self.libros_propios:
+            titulo = libro["titulo"]
+            autor = libro.get("autor", "")
+            url = f"https://cuspide.com/?s={urllib.parse.quote_plus(titulo)}&post_type=product"
+            yield Request(
+                url=url,
+                callback=self.parse,
+                meta={"titulo_interno": titulo, "autor_interno": autor},
+                dont_filter=True,
+                errback=self.errback_busqueda,
+            )
 
     def parse(self, response: Response) -> Generator[Request | LibroCompetidorItem, None, None]:
         """Procesa la página de resultados de búsqueda extrayendo hasta 10 productos.
@@ -141,6 +170,7 @@ class CuspideSpider(scrapy.Spider):
         query_parsed = urllib.parse.parse_qs(urllib.parse.urlparse(response.url).query)
         termino_buscado = query_parsed.get("s", [""])[0]
         titulo_interno = response.meta.get("titulo_interno", termino_buscado)
+        autor_interno = response.meta.get("autor_interno", "")
 
         # Seleccionar tarjetas de productos en el catálogo de resultados
         tarjetas = response.css(
@@ -171,6 +201,7 @@ class CuspideSpider(scrapy.Spider):
 
             meta_data = {
                 "titulo_interno": titulo_interno,
+                "autor_interno": autor_interno,
                 "card_titulo": titulo_competidor,
                 "card_precio": precio_texto,
                 "card_imagen": url_imagen,
@@ -187,6 +218,7 @@ class CuspideSpider(scrapy.Spider):
                 # Si no hay enlace a la ficha, generar ítem directamente desde la tarjeta
                 loader = LibroCompetidorLoader(item=LibroCompetidorItem(), selector=tarjeta)
                 loader.add_value("titulo_interno", titulo_interno)
+                loader.add_value("autor_interno", autor_interno)
                 loader.add_value("titulo_competidor", titulo_competidor)
                 loader.add_value("precio", precio_texto)
                 loader.add_value("precio_texto", precio_texto)
@@ -207,17 +239,27 @@ class CuspideSpider(scrapy.Spider):
             LibroCompetidorItem poblado a través de LibroCompetidorLoader.
         """
         titulo_interno = response.meta.get("titulo_interno")
+        autor_interno = response.meta.get("autor_interno")
         card_titulo = response.meta.get("card_titulo")
         card_precio = response.meta.get("card_precio")
         card_imagen = response.meta.get("card_imagen")
 
         loader = LibroCompetidorLoader(item=LibroCompetidorItem(), selector=response)
 
-        # 1. Títulos
+        # 1. Títulos y Autores
         loader.add_value("titulo_interno", titulo_interno)
+        loader.add_value("autor_interno", autor_interno)
         loader.add_css("titulo_competidor", "h1.product-title::text, h1::text")
         if not loader.get_collected_values("titulo_competidor") and card_titulo:
             loader.add_value("titulo_competidor", card_titulo)
+
+        # Autor competidor desde la ficha
+        loader.add_css(
+            "autor_competidor",
+            "p.livriz-authors::text, .product-summary a[href*='autor']::text, "
+            ".product-info a[href*='autor']::text, .author a::text, .author::text, "
+            ".product_meta a[href*='autor']::text, .posted_in a[href*='autor']::text"
+        )
 
         # 2. Precio
         loader.add_css("precio", "p.price bdi::text, .price .amount::text, p.price::text")
@@ -265,6 +307,7 @@ class CuspideSpider(scrapy.Spider):
         """Maneja fallos de conexión a la ficha detallada rescatando datos de la tarjeta."""
         request = failure.request
         titulo_interno = request.meta.get("titulo_interno")
+        autor_interno = request.meta.get("autor_interno")
         card_titulo = request.meta.get("card_titulo")
         card_precio = request.meta.get("card_precio")
         card_imagen = request.meta.get("card_imagen")
@@ -272,6 +315,7 @@ class CuspideSpider(scrapy.Spider):
         if card_precio:
             loader = LibroCompetidorLoader(item=LibroCompetidorItem())
             loader.add_value("titulo_interno", titulo_interno)
+            loader.add_value("autor_interno", autor_interno)
             loader.add_value("titulo_competidor", card_titulo or titulo_interno)
             loader.add_value("precio", card_precio)
             loader.add_value("precio_texto", card_precio)

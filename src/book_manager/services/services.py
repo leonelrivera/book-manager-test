@@ -7,9 +7,12 @@ integración con APIs externas (DolarAPI) y generación de reportes analíticos.
 
 import csv
 from datetime import date, datetime
+import difflib
 import functools
 import os
+import re
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+import unicodedata
 from dotenv import load_dotenv
 import requests
 
@@ -914,38 +917,75 @@ class ComparadorPreciosService:
         comparaciones: List[Dict[str, Any]] = []
         umbral = float(abs(umbral_diferencia))
 
-        # Crear un mapa rápido de libros propios indexados por título normalizado
         libros_propios = self._libro_service.listar_todos()
-        mapa_libros: Dict[str, Libro] = {
-            lib.titulo.strip().lower(): lib for lib in libros_propios if lib.titulo
+
+        def _norm(txt: Optional[str]) -> str:
+            if not txt:
+                return ""
+            nfkd = unicodedata.normalize("NFKD", str(txt))
+            sin_tildes = "".join(c for c in nfkd if not unicodedata.combining(c))
+            return re.sub(r"[^a-z0-9\s]", " ", sin_tildes.lower()).strip()
+
+        # Agrupar ítems extraídos validados por cada libro de nuestro catálogo
+        candidatos_por_libro: Dict[int, List[Tuple[float, Dict[str, Any]]]] = {
+            lib.id: [] for lib in libros_propios if lib.id is not None
         }
 
         for item in items_scraped:
             titulo_int = str(item.get("titulo_interno", "")).strip()
             titulo_comp = str(item.get("titulo_competidor", "")).strip()
-            precio_web = float(item["precio"]) if item.get("precio") is not None else None
-            url_img = item.get("url_imagen", "")
-            formas_pago = item.get("formas_pago", "")
-            url_libro = item.get("url_libro", "")
-            fecha_ext = item.get("fecha_extraccion", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            t_int_norm = _norm(titulo_int)
+            t_comp_norm = _norm(titulo_comp)
 
-            # Buscar libro correspondiente en catálogo interno
-            libro_obj = mapa_libros.get(titulo_int.lower())
-            if not libro_obj:
-                for clave, l in mapa_libros.items():
-                    if clave in titulo_int.lower() or titulo_int.lower() in clave:
-                        libro_obj = l
+            # Encontrar el libro correspondiente en el catálogo
+            libro_match = None
+            for lib in libros_propios:
+                if lib.titulo and _norm(lib.titulo) == t_int_norm:
+                    libro_match = lib
+                    break
+            if not libro_match:
+                for lib in libros_propios:
+                    if lib.titulo and (_norm(lib.titulo) in t_int_norm or t_int_norm in _norm(lib.titulo)):
+                        libro_match = lib
                         break
 
-            isbn = libro_obj.isbn if libro_obj else "N/D"
-            id_libro = libro_obj.id if libro_obj else None
+            if libro_match and libro_match.id is not None:
+                # Calcular similitud textual para elegir la edición principal
+                ratio = difflib.SequenceMatcher(None, _norm(libro_match.titulo), t_comp_norm).ratio()
+                candidatos_por_libro[libro_match.id].append((ratio, item))
+
+        for lib in libros_propios:
+            if lib.id is None:
+                continue
+            isbn = lib.isbn if lib.isbn else "N/D"
+            id_libro = lib.id
+            titulo_int = lib.titulo
 
             # Obtener precio interno en Pesos Argentinos (id_moneda=1)
             precio_interno: Optional[float] = None
-            if id_libro is not None:
-                p_obj = self._precio_service.obtener_precio_por_libro_y_moneda(id_libro, id_moneda=1)
-                if p_obj and p_obj.valor is not None:
-                    precio_interno = float(p_obj.valor)
+            p_obj = self._precio_service.obtener_precio_por_libro_y_moneda(id_libro, id_moneda=1)
+            if p_obj and p_obj.valor is not None:
+                precio_interno = float(p_obj.valor)
+
+            candidatos = candidatos_por_libro.get(id_libro, [])
+            if candidatos:
+                # Ordenar por mayor ratio de similitud para elegir el mejor match
+                candidatos.sort(key=lambda x: x[0], reverse=True)
+                _, mejor_item = candidatos[0]
+
+                titulo_comp = str(mejor_item.get("titulo_competidor", "")).strip()
+                precio_web = float(mejor_item["precio"]) if mejor_item.get("precio") is not None else None
+                url_img = mejor_item.get("url_imagen", "")
+                formas_pago = mejor_item.get("formas_pago", "")
+                url_libro = mejor_item.get("url_libro", "")
+                fecha_ext = mejor_item.get("fecha_extraccion", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            else:
+                titulo_comp = "Sin coincidencia en Cúspide"
+                precio_web = None
+                url_img = ""
+                formas_pago = ""
+                url_libro = ""
+                fecha_ext = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             # Cálculo de diferencias y determinación del tipo de alerta
             if precio_web is not None and precio_interno is not None:
@@ -975,16 +1015,16 @@ class ComparadorPreciosService:
                     detalle = "El libro no tiene precio asignado en el catálogo interno"
                 elif precio_web is None and precio_interno is not None:
                     tipo_alerta = "SIN PRECIO WEB"
-                    detalle = "No se pudo extraer precio web desde Cúspide"
+                    detalle = "No se encontró edición coincidente en Cúspide Libros"
                 else:
                     tipo_alerta = "SIN PRECIOS"
                     detalle = "Sin precio interno ni web disponible"
-                alerta_activa = True
+                alerta_activa = False
 
             registro: Dict[str, Any] = {
                 "id_libro": id_libro,
                 "isbn": isbn,
-                "titulo_interno": titulo_int or (libro_obj.titulo if libro_obj else "Desconocido"),
+                "titulo_interno": titulo_int,
                 "titulo_competidor": titulo_comp,
                 "precio_interno": precio_interno,
                 "precio_web": precio_web,

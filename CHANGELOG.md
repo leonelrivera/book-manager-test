@@ -51,6 +51,7 @@
 [Ejercicio 4]
 * Implementación del servicio de comparación de precios y generación de alertas de mercado (`ComparadorPreciosService`) en `src/book_manager/services/services.py`:
   - Comparación sistemática entre el precio interno del catálogo (en Pesos Argentinos - ARS) y el precio extraído desde la web del competidor (Cúspide Libros).
+  - Selección optimizada del mejor match por cada libro del catálogo (`difflib.SequenceMatcher`), garantizando una única fila representativa por obra y eliminando alertas duplicadas de múltiples ediciones.
   - Cálculo de diferencias nominales y porcentuales entre precios, determinando el tipo de alerta (`COMPETIDOR MÁS CARO`, `COMPETIDOR MÁS BARATO`, `PRECIOS IGUALES`, `SIN PRECIO INTERNO`, `SIN PRECIO WEB`).
   - Activación de alertas de precio en función de un umbral mínimo de diferencia configurable, solicitado al usuario antes de cada ejecución del proceso.
   - Generación automática de archivo descargable en formato CSV (`src/book_manager/reportes/alertas_precios.csv`) con columnas estructuradas para análisis analítico (`isbn`, `titulo_interno`, `titulo_competidor`, `precio_interno`, `precio_web`, `diferencia`, `diferencia_porcentual`, `alerta_activa`, `tipo_alerta`, `detalle_alerta`, `formas_pago`, `url_libro`, `fecha_extraccion`).
@@ -62,12 +63,12 @@
 
 [Ejercicio 3]
 * Implementación del spider `CuspideSpider` (`src/book_manager/scraper/spiders/cuspide_spider.py`) utilizando el framework Scrapy:
-  - Extracción automatizada desde el catálogo web de Cúspide Libros (WooCommerce) de los campos requeridos: precio actual, URL de la imagen de portada, formas de pago y cuotas, y descripción detallada/sinopsis.
-  - Filtrado y acotamiento estricto a los libros existentes en el catálogo propio, consultando la base de datos relacional y utilizando respaldo en archivo CSV.
+  - Extracción automatizada desde el catálogo web de Cúspide Libros (WooCommerce) de los campos requeridos: precio actual, URL de la imagen de portada, formas de pago y cuotas, descripción detallada/sinopsis y autor competidor.
+  - Filtrado y acotamiento estricto a los libros existentes en el catálogo propio, inyectando título y autor interno en la metadata de navegación.
   - Limitación paramétrica de hasta los 10 primeros resultados por cada búsqueda de título.
-* Implementación y refinamiento de procesadores de carga con `LibroCompetidorLoader` (`src/book_manager/scraper/loaders.py`) para limpieza de espacios, normalización numérica de precios decimales y combinación estructurada de descripciones y formas de pago.
+* Implementación y refinamiento de procesadores de carga con `LibroCompetidorLoader` (`src/book_manager/scraper/loaders.py`) para limpieza de espacios, normalización numérica de precios decimales, procesamiento de autores y combinación estructurada de descripciones y formas de pago.
 * Implementación de pipelines de procesamiento (`src/book_manager/scraper/pipelines.py`):
-  - `ValidacionLibroPipeline`: Validación de completitud, descarte de registros con precios inválidos o nulos e imputación de valores por defecto coherentes.
+  - `ValidacionLibroPipeline`: Validación semántica de coincidencia de título y autor (descartando con `DropItem` obras que no pertenezcan al autor buscado o títulos ajenos como falsos positivos del buscador web), descarte de registros con precios inválidos o nulos e imputación de valores por defecto coherentes.
   - `AlmacenamientoItemsPipeline`: Recolección en memoria de los ítems validados durante la sesión de rastreo.
 * Creación del módulo ejecutor `runner.py` (`src/book_manager/scraper/runner.py`) con la función `ejecutar_scraper()`, aislando la ejecución de Twisted en subprocesos para permitir llamadas reiteradas sin errores `ReactorNotRestartable`.
 * Creación de `scrapy.cfg` en la raíz del proyecto para integración con la CLI estándar de Scrapy.

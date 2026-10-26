@@ -59,7 +59,9 @@ class LibroCompetidorLoader(ItemLoader):
     default_output_processor = TakeFirst()
 
     titulo_interno_in = MapCompose(limpiar_texto)
+    autor_interno_in = MapCompose(limpiar_texto)
     titulo_competidor_in = MapCompose(limpiar_texto)
+    autor_competidor_in = MapCompose(limpiar_texto)
     precio_in = MapCompose(normalizar_precio)
     precio_texto_in = MapCompose(limpiar_texto)
     url_imagen_in = MapCompose(limpiar_texto)
