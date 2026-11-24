@@ -10,7 +10,7 @@ import csv
 import os
 import urllib.parse
 from datetime import datetime
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any, AsyncIterator, Dict, Generator, List, Optional
 import scrapy
 from scrapy.http import Request, Response
 
@@ -133,6 +133,11 @@ class CuspideSpider(scrapy.Spider):
                     pass
 
         return libros_resultado
+
+    async def start(self) -> AsyncIterator[Request]:
+        """Punto de entrada asíncrono (Scrapy 2.13+) que delega en start_requests."""
+        for request in self.start_requests():
+            yield request
 
     def start_requests(self) -> Generator[Request, None, None]:
         """Genera las solicitudes iniciales inyectando id_libro, título y autor en meta."""

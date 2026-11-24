@@ -117,17 +117,16 @@ class ValidacionLibroPipeline:
                         p for p in palabras_comp
                         if p not in palabras_int and not p.isdigit()
                     ]
-                    if not coincide_en_desc:
-                        if len(palabras_int) == 1 and palabras_extra:
-                            raise DropItem(
-                                f"Ítem descartado: '{titulo_comp}' contiene términos ajenos "
-                                f"al título '{titulo_int}' sin confirmación de autor."
-                            )
-                        if ratio_titulo < 0.78:
-                            raise DropItem(
-                                f"Ítem descartado: '{titulo_comp}' sin autor confirmado "
-                                f"difiere de '{titulo_int}' (ratio={ratio_titulo:.2f})."
-                            )
+                    if len(palabras_int) == 1 and palabras_extra:
+                        raise DropItem(
+                            f"Ítem descartado: '{titulo_comp}' contiene términos ajenos "
+                            f"al título '{titulo_int}' sin confirmación de autor."
+                        )
+                    if not coincide_en_desc and ratio_titulo < 0.78:
+                        raise DropItem(
+                            f"Ítem descartado: '{titulo_comp}' sin autor confirmado "
+                            f"difiere de '{titulo_int}' (ratio={ratio_titulo:.2f})."
+                        )
 
         if not item.get("fecha_extraccion"):
             item["fecha_extraccion"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -143,16 +142,22 @@ class PersistenciaDBPipeline:
     """Pipeline encargado de persistir cada ítem validado en la base de datos."""
 
     def __init__(self) -> None:
-        """Inicializa el pipeline sin conexión activa hasta la apertura de la spider."""
+        """Inicializa el pipeline con inicialización diferida del repositorio."""
         self._repo: Optional[Any] = None
 
-    def open_spider(self, spider: Optional[Any] = None) -> None:
-        """Instancia el repositorio de precios de competidor al iniciar el rastreo."""
-        from book_manager.database.connection import ConexionDB
-        from book_manager.repositories.repositories import RepositorioPrecioCompetidor
+    def _obtener_repo(self) -> Any:
+        """Retorna o inicializa el repositorio de precios de competidor."""
+        if self._repo is None:
+            from book_manager.database.connection import ConexionDB
+            from book_manager.repositories.repositories import RepositorioPrecioCompetidor
 
-        conexion = ConexionDB.get_instancia()
-        self._repo = RepositorioPrecioCompetidor(conexion)
+            conexion = ConexionDB.get_instancia()
+            self._repo = RepositorioPrecioCompetidor(conexion)
+        return self._repo
+
+    def open_spider(self, spider: Optional[Any] = None) -> None:
+        """Prepara el repositorio al iniciar el rastreo si el motor invoca el hook."""
+        self._obtener_repo()
 
     def process_item(self, item: LibroCompetidorItem, spider: Optional[Any] = None) -> LibroCompetidorItem:
         """Persiste el resultado validado en la tabla precios_competidor vinculado a id_libro.
@@ -166,7 +171,8 @@ class PersistenciaDBPipeline:
         """
         id_libro = item.get("id_libro")
         precio_web = item.get("precio")
-        if self._repo is not None and id_libro and precio_web:
+        if id_libro and precio_web:
+            repo = self._obtener_repo()
             entidad = PrecioCompetidor(
                 id_libro=int(id_libro),
                 titulo_competidor=str(item.get("titulo_competidor") or ""),
@@ -178,7 +184,7 @@ class PersistenciaDBPipeline:
                 url_libro=str(item.get("url_libro") or ""),
                 fecha_extraccion=item.get("fecha_extraccion"),
             )
-            self._repo.crear(entidad)
+            repo.crear(entidad)
         return item
 
 
@@ -192,6 +198,8 @@ class AlmacenamientoItemsPipeline:
 
     def process_item(self, item: LibroCompetidorItem, spider: Optional[Any] = None) -> LibroCompetidorItem:
         """Agrega una copia en formato diccionario del ítem a la lista de la spider."""
-        if spider is not None and hasattr(spider, "items_scraped"):
+        if spider is not None:
+            if not hasattr(spider, "items_scraped"):
+                spider.items_scraped = []
             spider.items_scraped.append(dict(item))
         return item

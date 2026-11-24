@@ -1083,8 +1083,7 @@ class ComparadorPreciosService:
                 os.path.join(os.path.dirname(__file__), "..", "reportes")
             )
             os.makedirs(directorio_base, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            ruta_csv = os.path.join(directorio_base, f"alertas_precios_{timestamp}.csv")
+            ruta_csv = os.path.join(directorio_base, "alertas_precios.csv")
         else:
             directorio_destino = os.path.dirname(os.path.abspath(ruta_csv))
             if directorio_destino:
@@ -1330,17 +1329,17 @@ class ComparadorPreciosService:
             c_tot_lbl.font = Font(name="Calibri", size=10, bold=True, color="1F497D")
             c_tot_lbl.alignment = Alignment(horizontal="left", vertical="center")
 
-            c_tot_pint = ws.cell(row=fila_total, column=2, value=f"=AVERAGE(B{fila_inicio}:B{fila_fin})")
+            c_tot_pint = ws.cell(row=fila_total, column=2, value=f'=IFERROR(AVERAGE(B{fila_inicio}:B{fila_fin}), "N/D")')
             c_tot_pint.font = Font(name="Calibri", size=10, bold=True, color="1F497D")
             c_tot_pint.number_format = formato_moneda
             c_tot_pint.alignment = Alignment(horizontal="right", vertical="center")
 
-            c_tot_pweb = ws.cell(row=fila_total, column=3, value=f"=AVERAGE(C{fila_inicio}:C{fila_fin})")
+            c_tot_pweb = ws.cell(row=fila_total, column=3, value=f'=IFERROR(AVERAGE(C{fila_inicio}:C{fila_fin}), "N/D")')
             c_tot_pweb.font = Font(name="Calibri", size=10, bold=True, color="1F497D")
             c_tot_pweb.number_format = formato_moneda
             c_tot_pweb.alignment = Alignment(horizontal="right", vertical="center")
 
-            c_tot_dif = ws.cell(row=fila_total, column=4, value=f"=AVERAGE(D{fila_inicio}:D{fila_fin})")
+            c_tot_dif = ws.cell(row=fila_total, column=4, value=f'=IFERROR(AVERAGE(D{fila_inicio}:D{fila_fin}), 0)')
             c_tot_dif.font = Font(name="Calibri", size=10, bold=True, color="1F497D")
             c_tot_dif.number_format = formato_dif
             c_tot_dif.alignment = Alignment(horizontal="right", vertical="center")

@@ -2,8 +2,8 @@
 * Ejercicio 02: Integración efectiva de `cargar_datos_desde_sql()` en `src/book_manager/main.py` cuando `import_default_data=True`, y refactorización transaccional en `src/book_manager/preload_data/preload_data.py` para ejecutar la carga de forma atómica con rollback completo ante cualquier error SQL (sin continuar a medias).
 * Ejercicio 03:
   - Eliminación de textos inventados/fallback en `CuspideSpider` (`cuspide_spider.py`) y `ValidacionLibroPipeline` (`pipelines.py`): los datos ausentes en Cúspide (formas de pago, sinopsis, portada, autor) permanecen vacíos.
-  - Persistencia en base de datos de los resultados del scraping mediante el modelo `PrecioCompetidorModel`, entidad `PrecioCompetidor`, repositorio `RepositorioPrecioCompetidor`, script `migrations/sql/precios_competidor.sql` y pipeline `PersistenciaDBPipeline`, vinculando cada registro con `id_libro`.
-  - Endurecimiento de validación de correspondencia título/autor en `ValidacionLibroPipeline` para descartar falsos positivos como "FICCIONES CON CIENCIA".
+  - Persistencia en base de datos de los resultados del scraping mediante el modelo `PrecioCompetidorModel`, entidad `PrecioCompetidor`, repositorio `RepositorioPrecioCompetidor`, script `migrations/sql/precios_competidor.sql` y pipeline `PersistenciaDBPipeline` (con inicialización diferida compatible con Scrapy 2.19), vinculando cada registro con `id_libro`.
+  - Endurecimiento de validación de correspondencia título/autor en `ValidacionLibroPipeline` para descartar falsos positivos como "FICCIONES CON CIENCIA" aun cuando mencionen al autor en la sinopsis.
   - Activación de `ROBOTSTXT_OBEY = True` e identificación con `USER_AGENT` propio (`BookManagerBot/1.0`) en `src/book_manager/scraper/settings.py`.
 * Ejercicio 04:
   - Validación interactiva en bucle de la diferencia de precios en `ConsolaUI._solicitar_umbral_diferencia()` rechazando entradas vacías, no numéricas o negativas.
