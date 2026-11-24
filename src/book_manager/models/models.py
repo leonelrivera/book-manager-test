@@ -175,6 +175,12 @@ class LibroModel(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    precios_competidor: Mapped[List["PrecioCompetidorModel"]] = relationship(
+        "PrecioCompetidorModel",
+        back_populates="libro",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     def __repr__(self) -> str:
         return (
@@ -299,6 +305,39 @@ class AuditoriaModel(Base):
         return f"AuditoriaModel(id={self.id}, accion='{self.accion}', fecha='{self.fecha}', detalles='{resumen}...' )"
 
 
-# Aliases y exportación de modelos
+class PrecioCompetidorModel(Base):
+    """Modelo ORM para la tabla 'precios_competidor'.
+
+    Persiste los resultados extraídos mediante web scraping desde Cúspide Libros,
+    vinculando cada registro con el libro correspondiente del catálogo propio.
+    """
+
+    __tablename__ = "precios_competidor"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id_libro: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("libros.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    titulo_competidor: Mapped[str] = mapped_column(String(255), nullable=False)
+    autor_competidor: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, default="")
+    precio_web: Mapped[float] = mapped_column(Float, nullable=False)
+    url_imagen: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default="")
+    formas_pago: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default="")
+    descripcion: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default="")
+    url_libro: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default="")
+    fecha_extraccion: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
+
+    libro: Mapped["LibroModel"] = relationship("LibroModel", back_populates="precios_competidor")
+
+    def __repr__(self) -> str:
+        """Retorna una representación textual legible del registro extraído."""
+        return (
+            f"PrecioCompetidorModel(id={self.id}, id_libro={self.id_libro}, "
+            f"titulo_competidor='{self.titulo_competidor}', precio_web={self.precio_web})"
+        )
+
+
 CotizacionModel = CotizacionDolarModel
 

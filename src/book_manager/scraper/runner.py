@@ -1,8 +1,7 @@
 """Módulo orquestador y ejecutor de spiders para Scrapy.
 
-Permite invocar CuspideSpider de forma programática y aislada mediante subprocesos
-o CrawlerProcess, evitando el error ReactorNotRestartable de Twisted en ejecuciones
-reiteradas desde la interfaz de consola interactiva o notebooks de Google Colab.
+Permite invocar CuspideSpider de forma programática y aislada mediante subprocesos,
+evitando el error ReactorNotRestartable de Twisted en ejecuciones reiteradas.
 """
 
 import json
@@ -18,18 +17,20 @@ def ejecutar_scraper(
     max_resultados: int = 10,
     archivo_salida: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Ejecuta CuspideSpider y retorna los ítems extraídos como una lista de diccionarios.
+    """Ejecuta CuspideSpider y retorna los ítems extraídos como diccionarios.
+
+    Durante la ejecución, PersistenciaDBPipeline guarda automáticamente los
+    resultados validados en la tabla ``precios_competidor`` vinculados por
+    ``id_libro``.
 
     Args:
-        libros: Lista de títulos de libros de nuestro catálogo a buscar. Si es None,
-            la spider consulta automáticamente el inventario actual.
+        libros: Lista opcional de títulos de libros del catálogo propio a buscar.
         max_resultados: Límite de resultados por búsqueda (por defecto 10).
-        archivo_salida: Ruta opcional donde guardar el archivo JSON con los resultados.
+        archivo_salida: Ruta opcional donde conservar la salida JSON.
 
     Returns:
-        List[Dict[str, Any]]: Lista de diccionarios con los libros extraídos y validados.
+        List[Dict[str, Any]]: Lista de ítems extraídos y validados.
     """
-    # Crear archivo temporal para la salida JSON si no se especificó uno
     if archivo_salida:
         salida_json = archivo_salida
         eliminar_al_terminar = False
@@ -39,9 +40,7 @@ def ejecutar_scraper(
         eliminar_al_terminar = True
 
     try:
-        # Script en línea para ejecutar Scrapy en un subproceso aislado
         script_ejecucion = (
-            "import sys\n"
             "from scrapy.crawler import CrawlerProcess\n"
             "from scrapy.utils.project import get_project_settings\n"
             "from book_manager.scraper.spiders.cuspide_spider import CuspideSpider\n"
@@ -67,7 +66,6 @@ def ejecutar_scraper(
         src_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
         env["PYTHONPATH"] = f"{src_path}{os.pathsep}{env.get('PYTHONPATH', '')}"
 
-        # Ejecutar el subproceso utilizando el mismo intérprete de Python activo
         resultado = subprocess.run(
             [sys.executable, "-c", script_ejecucion],
             cwd=cwd_path,
@@ -80,7 +78,6 @@ def ejecutar_scraper(
         if resultado.returncode != 0:
             print(f"⚠️ Advertencia en ejecución del scraper: {resultado.stderr.strip()}")
 
-        # Leer los resultados generados en el archivo JSON
         if os.path.exists(salida_json) and os.path.getsize(salida_json) > 0:
             with open(salida_json, mode="r", encoding="utf-8") as f:
                 items = json.load(f)

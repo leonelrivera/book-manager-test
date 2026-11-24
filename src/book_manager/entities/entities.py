@@ -876,6 +876,194 @@ class Auditoria(EntidadBase):
         return f"Auditoria(id={self.id}, accion='{self.accion}', fecha='{f_str}', detalles='{self.detalles}')"
 
 
-# Aliases para compatibilidad con la consigna
+class PrecioCompetidor(EntidadBase):
+    """Entidad de dominio que representa un resultado de scraping de un competidor.
+
+    Vincula los datos extraídos desde Cúspide Libros con el libro del catálogo
+    propio mediante su identificador ``id_libro``.
+    """
+
+    def __init__(
+        self,
+        id_registro: Optional[int] = None,
+        id_libro: int = 0,
+        titulo_competidor: str = "",
+        autor_competidor: str = "",
+        precio_web: float = 0.0,
+        url_imagen: str = "",
+        formas_pago: str = "",
+        descripcion: str = "",
+        url_libro: str = "",
+        fecha_extraccion: Optional[Union[datetime, str]] = None,
+    ) -> None:
+        """Inicializa un registro de precio competidor vinculado a un libro.
+
+        Args:
+            id_registro: Identificador único del registro en base de datos.
+            id_libro: Identificador del libro en el catálogo interno.
+            titulo_competidor: Título publicado en el sitio competidor.
+            autor_competidor: Autor publicado en el sitio competidor.
+            precio_web: Precio extraído en moneda local (ARS).
+            url_imagen: URL de la portada del libro si está disponible.
+            formas_pago: Información de cuotas o medios de pago si está disponible.
+            descripcion: Sinopsis o descripción si está disponible.
+            url_libro: Enlace a la ficha del producto en el competidor.
+            fecha_extraccion: Marca temporal de extracción.
+        """
+        super().__init__(id_registro)
+        self.id_libro = id_libro
+        self.titulo_competidor = titulo_competidor
+        self.autor_competidor = autor_competidor
+        self.precio_web = precio_web
+        self.url_imagen = url_imagen
+        self.formas_pago = formas_pago
+        self.descripcion = descripcion
+        self.url_libro = url_libro
+        if fecha_extraccion is None:
+            self._fecha_extraccion = datetime.now()
+        elif isinstance(fecha_extraccion, str):
+            try:
+                self._fecha_extraccion = datetime.fromisoformat(fecha_extraccion)
+            except ValueError:
+                self._fecha_extraccion = datetime.strptime(fecha_extraccion, "%Y-%m-%d %H:%M:%S")
+        elif isinstance(fecha_extraccion, datetime):
+            self._fecha_extraccion = fecha_extraccion
+        else:
+            self._fecha_extraccion = datetime.now()
+
+    @property
+    def id_libro(self) -> int:
+        """Identificador del libro asociado en el catálogo interno."""
+        return self._id_libro
+
+    @id_libro.setter
+    def id_libro(self, valor: int) -> None:
+        if not isinstance(valor, int) or valor <= 0:
+            raise ValueError("El id_libro debe ser un entero positivo.")
+        self._id_libro = valor
+
+    @property
+    def titulo_competidor(self) -> str:
+        """Título del libro publicado por el competidor."""
+        return self._titulo_competidor
+
+    @titulo_competidor.setter
+    def titulo_competidor(self, valor: str) -> None:
+        if not valor or not str(valor).strip():
+            raise ValueError("El título del competidor no puede estar vacío.")
+        self._titulo_competidor = str(valor).strip()
+
+    @property
+    def autor_competidor(self) -> str:
+        """Autor del libro publicado por el competidor."""
+        return self._autor_competidor
+
+    @autor_competidor.setter
+    def autor_competidor(self, valor: Optional[str]) -> None:
+        self._autor_competidor = str(valor).strip() if valor else ""
+
+    @property
+    def precio_web(self) -> float:
+        """Precio extraído del sitio web competidor."""
+        return self._precio_web
+
+    @precio_web.setter
+    def precio_web(self, valor: Union[float, int]) -> None:
+        if not isinstance(valor, (int, float)) or valor <= 0:
+            raise ValueError("El precio web debe ser un número mayor que cero.")
+        self._precio_web = float(valor)
+
+    @property
+    def url_imagen(self) -> str:
+        """URL de la imagen de portada del libro."""
+        return self._url_imagen
+
+    @url_imagen.setter
+    def url_imagen(self, valor: Optional[str]) -> None:
+        self._url_imagen = str(valor).strip() if valor else ""
+
+    @property
+    def formas_pago(self) -> str:
+        """Medios de pago y cuotas informados por el competidor."""
+        return self._formas_pago
+
+    @formas_pago.setter
+    def formas_pago(self, valor: Optional[str]) -> None:
+        self._formas_pago = str(valor).strip() if valor else ""
+
+    @property
+    def descripcion(self) -> str:
+        """Descripción o sinopsis extraída del sitio competidor."""
+        return self._descripcion
+
+    @descripcion.setter
+    def descripcion(self, valor: Optional[str]) -> None:
+        self._descripcion = str(valor).strip() if valor else ""
+
+    @property
+    def url_libro(self) -> str:
+        """URL de la ficha del libro en el sitio competidor."""
+        return self._url_libro
+
+    @url_libro.setter
+    def url_libro(self, valor: Optional[str]) -> None:
+        self._url_libro = str(valor).strip() if valor else ""
+
+    @property
+    def fecha_extraccion(self) -> datetime:
+        """Fecha y hora en la que se extrajo el registro."""
+        return self._fecha_extraccion
+
+    @fecha_extraccion.setter
+    def fecha_extraccion(self, valor: Union[datetime, str]) -> None:
+        if isinstance(valor, str):
+            try:
+                self._fecha_extraccion = datetime.fromisoformat(valor)
+            except ValueError:
+                self._fecha_extraccion = datetime.strptime(valor, "%Y-%m-%d %H:%M:%S")
+        elif isinstance(valor, datetime):
+            self._fecha_extraccion = valor
+        else:
+            raise TypeError("La fecha de extracción debe ser datetime o string ISO.")
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serializa la entidad a un diccionario plano."""
+        return {
+            "id": self.id,
+            "id_libro": self.id_libro,
+            "titulo_competidor": self.titulo_competidor,
+            "autor_competidor": self.autor_competidor,
+            "precio_web": self.precio_web,
+            "url_imagen": self.url_imagen,
+            "formas_pago": self.formas_pago,
+            "descripcion": self.descripcion,
+            "url_libro": self.url_libro,
+            "fecha_extraccion": self.fecha_extraccion.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "PrecioCompetidor":
+        """Construye una instancia de PrecioCompetidor a partir de un diccionario."""
+        return cls(
+            id_registro=int(data["id"]) if data.get("id") is not None and str(data["id"]).strip() else None,
+            id_libro=int(data["id_libro"]),
+            titulo_competidor=str(data.get("titulo_competidor", "")),
+            autor_competidor=str(data.get("autor_competidor", "")),
+            precio_web=float(data["precio_web"]),
+            url_imagen=str(data.get("url_imagen", "")),
+            formas_pago=str(data.get("formas_pago", "")),
+            descripcion=str(data.get("descripcion", "")),
+            url_libro=str(data.get("url_libro", "")),
+            fecha_extraccion=data.get("fecha_extraccion"),
+        )
+
+    def __repr__(self) -> str:
+        """Retorna una representación textual legible de PrecioCompetidor."""
+        return (
+            f"PrecioCompetidor(id={self.id}, id_libro={self.id_libro}, "
+            f"titulo_competidor='{self.titulo_competidor}', precio_web={self.precio_web:.2f})"
+        )
+
+
 Cotizacion = CotizacionDolar
 RegistroAuditoria = Auditoria

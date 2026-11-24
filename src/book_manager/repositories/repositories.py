@@ -22,6 +22,7 @@ from book_manager.entities.entities import (
     Libro,
     Moneda,
     Precio,
+    PrecioCompetidor,
     Stock,
     TipoCotizacion,
 )
@@ -33,6 +34,7 @@ from book_manager.models.models import (
     GeneroModel,
     LibroModel,
     MonedaModel,
+    PrecioCompetidorModel,
     PrecioModel,
     StockModel,
     TipoCotizacionModel,
@@ -652,4 +654,82 @@ class RepositorioAuditoria(RepositorioBase[Auditoria, AuditoriaModel]):
             )
             modelos = session.scalars(stmt).all()
             return [self._a_entidad(m) for m in modelos]
+
+
+class RepositorioPrecioCompetidor(RepositorioBase[PrecioCompetidor, PrecioCompetidorModel]):
+    """Repositorio para la persistencia de resultados de scraping vinculados a libros."""
+
+    def __init__(self, conexion: Optional[ConexionDB] = None) -> None:
+        """Inicializa el repositorio asegurando la existencia de la tabla en la base."""
+        super().__init__(PrecioCompetidorModel, conexion)
+        try:
+            Base.metadata.create_all(
+                bind=self._conexion.engine,
+                tables=[PrecioCompetidorModel.__table__],
+                checkfirst=True,
+            )
+        except Exception:
+            pass
+
+    def _a_entidad(self, modelo: PrecioCompetidorModel) -> PrecioCompetidor:
+        """Convierte un registro ORM PrecioCompetidorModel en entidad PrecioCompetidor."""
+        return PrecioCompetidor(
+            id_registro=modelo.id,
+            id_libro=modelo.id_libro,
+            titulo_competidor=modelo.titulo_competidor,
+            autor_competidor=modelo.autor_competidor or "",
+            precio_web=modelo.precio_web,
+            url_imagen=modelo.url_imagen or "",
+            formas_pago=modelo.formas_pago or "",
+            descripcion=modelo.descripcion or "",
+            url_libro=modelo.url_libro or "",
+            fecha_extraccion=modelo.fecha_extraccion,
+        )
+
+    def _a_modelo(self, entidad: PrecioCompetidor) -> PrecioCompetidorModel:
+        """Convierte una entidad PrecioCompetidor en modelo ORM PrecioCompetidorModel."""
+        return PrecioCompetidorModel(
+            id=entidad.id,
+            id_libro=entidad.id_libro,
+            titulo_competidor=entidad.titulo_competidor,
+            autor_competidor=entidad.autor_competidor,
+            precio_web=entidad.precio_web,
+            url_imagen=entidad.url_imagen,
+            formas_pago=entidad.formas_pago,
+            descripcion=entidad.descripcion,
+            url_libro=entidad.url_libro,
+            fecha_extraccion=entidad.fecha_extraccion,
+        )
+
+    def leer_por_libro(self, id_libro: int) -> List[PrecioCompetidor]:
+        """Recupera el historial de resultados scrapeados para un libro específico."""
+        with transaccion_db() as session:
+            stmt = (
+                select(PrecioCompetidorModel)
+                .where(PrecioCompetidorModel.id_libro == id_libro)
+                .order_by(PrecioCompetidorModel.fecha_extraccion.desc())
+            )
+            modelos = session.scalars(stmt).all()
+            return [self._a_entidad(m) for m in modelos]
+
+    def leer_ultimos_por_libro(self) -> List[PrecioCompetidor]:
+        """Obtiene el resultado de scraping más reciente para cada libro del catálogo."""
+        with transaccion_db() as session:
+            stmt = select(PrecioCompetidorModel).order_by(
+                PrecioCompetidorModel.fecha_extraccion.desc(),
+                PrecioCompetidorModel.id.desc(),
+            )
+            modelos = session.scalars(stmt).all()
+            ultimos: dict[int, PrecioCompetidor] = {}
+            for modelo in modelos:
+                if modelo.id_libro not in ultimos:
+                    ultimos[modelo.id_libro] = self._a_entidad(modelo)
+            return list(ultimos.values())
+
+    def eliminar_por_libro(self, id_libro: int) -> int:
+        """Elimina todos los registros de scraping asociados a un libro."""
+        with transaccion_db() as session:
+            stmt = delete(PrecioCompetidorModel).where(PrecioCompetidorModel.id_libro == id_libro)
+            resultado = session.execute(stmt)
+            return resultado.rowcount or 0
 

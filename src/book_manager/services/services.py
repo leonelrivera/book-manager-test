@@ -27,7 +27,6 @@ from book_manager.entities.entities import (
     Stock,
     TipoCotizacion,
 )
-from book_manager.models.models import AuditoriaModel
 from book_manager.repositories.repositories import (
     RepositorioAuditoria,
     RepositorioBase,
@@ -37,40 +36,38 @@ from book_manager.repositories.repositories import (
     RepositorioLibro,
     RepositorioMoneda,
     RepositorioPrecio,
+    RepositorioPrecioCompetidor,
     RepositorioStock,
     RepositorioTipoCotizacion,
 )
 
 
-_tabla_auditoria_verificada = False
+_repositorio_auditoria_global: Optional[RepositorioAuditoria] = None
+
+
+def _obtener_repo_auditoria() -> RepositorioAuditoria:
+    """Retorna la instancia compartida de RepositorioAuditoria para el decorador."""
+    global _repositorio_auditoria_global
+    if _repositorio_auditoria_global is None:
+        from book_manager.database.connection import ConexionDB
+
+        _repositorio_auditoria_global = RepositorioAuditoria(ConexionDB.get_instancia())
+    return _repositorio_auditoria_global
 
 
 def _persistir_auditoria(accion: str, fecha: datetime, detalles: str) -> None:
-    """Inserta de manera segura una fila en la tabla de auditoría en la base de datos."""
-    global _tabla_auditoria_verificada
-    try:
-        from book_manager.database.connection import ConexionDB, transaccion_db
-        from book_manager.models.models import Base
-        if not _tabla_auditoria_verificada:
-            try:
-                conexion = ConexionDB()
-                Base.metadata.create_all(
-                    bind=conexion.engine,
-                    tables=[AuditoriaModel.__table__],
-                    checkfirst=True,
-                )
-                _tabla_auditoria_verificada = True
-            except Exception:
-                pass
+    """Persiste un evento de auditoría delegando en RepositorioAuditoria.
 
-        with transaccion_db() as session:
-            session.add(AuditoriaModel(
-                accion=accion,
-                fecha=fecha,
-                detalles=detalles,
-            ))
+    Args:
+        accion: Identificador textual de la operación auditada.
+        fecha: Marca temporal de ejecución.
+        detalles: Resumen de parámetros, retorno y estado de la operación.
+    """
+    try:
+        repo = _obtener_repo_auditoria()
+        registro = Auditoria(accion=accion, fecha=fecha, detalles=detalles)
+        repo.crear(registro)
     except Exception:
-        # Previene que un error transaccional de auditoría interrumpa la operación de negocio
         pass
 
 
@@ -134,10 +131,11 @@ def auditar(accion_o_func: Optional[Union[str, Callable]] = None) -> Any:
     return decorador
 
 
-class AuditoriaService:
-    """Servicio de lógica de negocio para la consulta y administración de trazas de auditoría."""
+class ServicioAuditoria:
+    """Servicio de lógica de negocio para la consulta y administración de auditorías."""
 
     def __init__(self, repo_auditoria: RepositorioAuditoria) -> None:
+        """Inicializa el servicio vinculando el repositorio de auditoría."""
         self._repo = repo_auditoria
 
     def registrar_auditoria(
@@ -165,6 +163,9 @@ class AuditoriaService:
     def obtener_por_id(self, id_auditoria: int) -> Optional[Auditoria]:
         """Recupera un evento de auditoría por su identificador primario."""
         return self._repo.leer_por_id(id_auditoria)
+
+
+AuditoriaService = ServicioAuditoria
 
 
 class GeneroService:
@@ -648,10 +649,13 @@ class PrecioService:
         if moneda_usd and moneda_destino.upper() == "ARS":
             precio_usd = self._repo_precio.leer_por_libro_y_moneda(id_libro, moneda_usd.id)
             if precio_usd:
-                try:
-                    return self.convertir_precio(precio_usd.valor, "USD", "ARS", tipo_dolar)
-                except (ValueError, NotImplementedError):
-                    return None
+                tipos_candidatos = [tipo_dolar, "Oficial", "Blue"]
+                tipos_disponibles = [t.nombre for t in self._tipo_svc.listar_todos()]
+                for t_nombre in tipos_candidatos + tipos_disponibles:
+                    try:
+                        return self.convertir_precio(precio_usd.valor, "USD", "ARS", t_nombre)
+                    except (ValueError, NotImplementedError):
+                        continue
 
         return None
 
@@ -881,43 +885,62 @@ class ReporteService:
 
 
 class ComparadorPreciosService:
-    """Servicio de lógica de negocio para la comparación de precios internos vs competencia (Cúspide).
+    """Servicio de lógica de negocio para comparar precios internos vs competencia.
 
-    Implementa el contraste entre precios internos del catálogo y los precios
-    extraídos mediante web scraping, evaluando umbrales de diferencia ingresados
-    por el usuario y generando reportes de alertas en formato CSV descargable.
+    Contrasta los precios internos del catálogo (en ARS o convertidos desde USD
+    mediante las cotizaciones del sistema) frente a los precios extraídos desde
+    Cúspide Libros, generando alertas en CSV con fecha y hora y reportes Excel.
     """
 
-    def __init__(self, libro_service: LibroService, precio_service: PrecioService) -> None:
-        """Inicializa el comparador de precios vinculando los servicios de libros y precios.
+    def __init__(
+        self,
+        libro_service: LibroService,
+        precio_service: PrecioService,
+        repo_precio_competidor: Optional[RepositorioPrecioCompetidor] = None,
+    ) -> None:
+        """Inicializa el comparador vinculando los servicios y el repositorio de scraping.
 
         Args:
             libro_service: Servicio de libros para consulta de catálogo.
-            precio_service: Servicio de precios para consulta de valores internos en ARS.
+            precio_service: Servicio de precios para obtener valores internos en ARS/USD.
+            repo_precio_competidor: Repositorio de precios de competidor persistidos en DB.
         """
         self._libro_service = libro_service
         self._precio_service = precio_service
+        self._repo_precio_competidor = repo_precio_competidor
 
     @auditar("COMPARAR_PRECIOS")
     def comparar_precios(
         self,
         items_scraped: List[Dict[str, Any]],
         umbral_diferencia: float = 0.0,
+        tipo_dolar: str = "Blue",
     ) -> List[Dict[str, Any]]:
         """Compara los precios extraídos de la web contra el catálogo interno.
 
+        Vincula cada resultado principalmente mediante ``id_libro``. Si el libro
+        tiene precio interno en USD, lo convierte automáticamente a ARS utilizando
+        la cotización vigente registrada en el sistema.
+
         Args:
-            items_scraped: Lista de diccionarios de ítems obtenidos por CuspideSpider.
-            umbral_diferencia: Valor mínimo en ARS de discrepancia de precio para
-                generar una alerta (ingresado por el usuario). Por defecto 0.0.
+            items_scraped: Lista de diccionarios obtenidos por CuspideSpider o desde DB.
+            umbral_diferencia: Diferencia mínima en ARS (>= 0) que debe superarse
+                para activar una alerta.
+            tipo_dolar: Tipo de cotización a emplear para convertir precios en USD.
 
         Returns:
             List[Dict[str, Any]]: Lista de registros de comparación con estado de alerta.
-        """
-        comparaciones: List[Dict[str, Any]] = []
-        umbral = float(abs(umbral_diferencia))
 
+        Raises:
+            ValueError: Si ``umbral_diferencia`` es negativo.
+        """
+        umbral = float(umbral_diferencia)
+        if umbral < 0:
+            raise ValueError("La diferencia de precios no puede ser negativa.")
+
+        comparaciones: List[Dict[str, Any]] = []
         libros_propios = self._libro_service.listar_todos()
+        mapa_libros = {lib.id: lib for lib in libros_propios if lib.id is not None}
 
         def _norm(txt: Optional[str]) -> str:
             if not txt:
@@ -926,31 +949,25 @@ class ComparadorPreciosService:
             sin_tildes = "".join(c for c in nfkd if not unicodedata.combining(c))
             return re.sub(r"[^a-z0-9\s]", " ", sin_tildes.lower()).strip()
 
-        # Agrupar ítems extraídos validados por cada libro de nuestro catálogo
         candidatos_por_libro: Dict[int, List[Tuple[float, Dict[str, Any]]]] = {
-            lib.id: [] for lib in libros_propios if lib.id is not None
+            lib_id: [] for lib_id in mapa_libros
         }
 
         for item in items_scraped:
-            titulo_int = str(item.get("titulo_interno", "")).strip()
+            id_item = item.get("id_libro")
             titulo_comp = str(item.get("titulo_competidor", "")).strip()
-            t_int_norm = _norm(titulo_int)
             t_comp_norm = _norm(titulo_comp)
 
-            # Encontrar el libro correspondiente en el catálogo
-            libro_match = None
-            for lib in libros_propios:
-                if lib.titulo and _norm(lib.titulo) == t_int_norm:
-                    libro_match = lib
-                    break
-            if not libro_match:
+            libro_match = mapa_libros.get(int(id_item)) if id_item is not None else None
+            if libro_match is None:
+                titulo_int = str(item.get("titulo_interno", "")).strip()
+                t_int_norm = _norm(titulo_int)
                 for lib in libros_propios:
-                    if lib.titulo and (_norm(lib.titulo) in t_int_norm or t_int_norm in _norm(lib.titulo)):
+                    if lib.titulo and _norm(lib.titulo) == t_int_norm:
                         libro_match = lib
                         break
 
             if libro_match and libro_match.id is not None:
-                # Calcular similitud textual para elegir la edición principal
                 ratio = difflib.SequenceMatcher(None, _norm(libro_match.titulo), t_comp_norm).ratio()
                 candidatos_por_libro[libro_match.id].append((ratio, item))
 
@@ -961,33 +978,32 @@ class ComparadorPreciosService:
             id_libro = lib.id
             titulo_int = lib.titulo
 
-            # Obtener precio interno en Pesos Argentinos (id_moneda=1)
-            precio_interno: Optional[float] = None
-            p_obj = self._precio_service.obtener_precio_por_libro_y_moneda(id_libro, id_moneda=1)
-            if p_obj and p_obj.valor is not None:
-                precio_interno = float(p_obj.valor)
+            precio_interno: Optional[float] = self._precio_service.obtener_precio_estimado(
+                id_libro,
+                moneda_destino="ARS",
+                tipo_dolar=tipo_dolar,
+            )
 
             candidatos = candidatos_por_libro.get(id_libro, [])
             if candidatos:
-                # Ordenar por mayor ratio de similitud para elegir el mejor match
                 candidatos.sort(key=lambda x: x[0], reverse=True)
                 _, mejor_item = candidatos[0]
 
                 titulo_comp = str(mejor_item.get("titulo_competidor", "")).strip()
-                precio_web = float(mejor_item["precio"]) if mejor_item.get("precio") is not None else None
-                url_img = mejor_item.get("url_imagen", "")
-                formas_pago = mejor_item.get("formas_pago", "")
-                url_libro = mejor_item.get("url_libro", "")
-                fecha_ext = mejor_item.get("fecha_extraccion", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                precio_raw = mejor_item.get("precio") if mejor_item.get("precio") is not None else mejor_item.get("precio_web")
+                precio_web = float(precio_raw) if precio_raw is not None else None
+                url_img = str(mejor_item.get("url_imagen") or "")
+                formas_pago = str(mejor_item.get("formas_pago") or "")
+                url_libro = str(mejor_item.get("url_libro") or "")
+                fecha_ext = str(mejor_item.get("fecha_extraccion") or datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
             else:
-                titulo_comp = "Sin coincidencia en Cúspide"
+                titulo_comp = ""
                 precio_web = None
                 url_img = ""
                 formas_pago = ""
                 url_libro = ""
                 fecha_ext = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-            # Cálculo de diferencias y determinación del tipo de alerta
             if precio_web is not None and precio_interno is not None:
                 diferencia = round(precio_web - precio_interno, 2)
                 diferencia_abs = abs(diferencia)
@@ -1005,7 +1021,7 @@ class ComparadorPreciosService:
                     tipo_alerta = "PRECIOS IGUALES"
                     detalle = "El precio de Cúspide coincide exactamente con el precio interno"
 
-                alerta_activa = diferencia_abs >= umbral
+                alerta_activa = diferencia_abs > umbral
             else:
                 diferencia = 0.0
                 diferencia_abs = 0.0
@@ -1048,14 +1064,16 @@ class ComparadorPreciosService:
         self,
         alertas: List[Dict[str, Any]],
         ruta_csv: Optional[str] = None,
-        solo_alertas_activas: bool = False,
+        solo_alertas_activas: bool = True,
     ) -> str:
-        """Genera un archivo CSV con las alertas de precios para su descarga y análisis.
+        """Genera un archivo CSV con fecha y hora listando las alertas que superan el umbral.
 
         Args:
             alertas: Lista de diccionarios generados por comparar_precios.
-            ruta_csv: Ruta opcional de destino. Por defecto se guarda en 'reportes/alertas_precios.csv'.
-            solo_alertas_activas: Si es True, filtra únicamente registros con alerta_activa=True.
+            ruta_csv: Ruta opcional de destino. Por defecto se genera un archivo único
+                con timestamp ``reportes/alertas_precios_YYYYMMDD_HHMMSS.csv``.
+            solo_alertas_activas: Si es True (por defecto), incluye únicamente los
+                libros cuya diferencia supera el umbral ingresado por el usuario.
 
         Returns:
             str: Ruta absoluta al archivo CSV generado.
@@ -1065,13 +1083,15 @@ class ComparadorPreciosService:
                 os.path.join(os.path.dirname(__file__), "..", "reportes")
             )
             os.makedirs(directorio_base, exist_ok=True)
-            ruta_csv = os.path.join(directorio_base, "alertas_precios.csv")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            ruta_csv = os.path.join(directorio_base, f"alertas_precios_{timestamp}.csv")
         else:
             directorio_destino = os.path.dirname(os.path.abspath(ruta_csv))
             if directorio_destino:
                 os.makedirs(directorio_destino, exist_ok=True)
 
         campos = [
+            "id_libro",
             "isbn",
             "titulo_interno",
             "titulo_competidor",
@@ -1115,35 +1135,52 @@ class ComparadorPreciosService:
         umbral_diferencia: float = 0.0,
         libros: Optional[List[str]] = None,
         ruta_csv: Optional[str] = None,
+        tipo_dolar: str = "Blue",
     ) -> Dict[str, Any]:
-        """Ejecuta el scraper de Cúspide y genera automáticamente el CSV de alertas.
+        """Ejecuta el scraper de Cúspide, persiste resultados y genera el CSV de alertas.
 
         Args:
-            umbral_diferencia: Diferencia mínima requerida para generar alertas.
+            umbral_diferencia: Diferencia mínima (>= 0) que debe superarse para alertar.
             libros: Lista opcional de títulos de libros a scrapear.
             ruta_csv: Ruta opcional para guardar el archivo CSV de alertas.
+            tipo_dolar: Cotización del dólar para convertir precios internos en USD.
 
         Returns:
-            Dict[str, Any]: Resumen con total extraído, total alertas y ruta del CSV.
+            Dict[str, Any]: Resumen con ítems extraídos, alertas activas y ruta del CSV.
+
+        Raises:
+            ValueError: Si ``umbral_diferencia`` es negativo.
         """
+        if umbral_diferencia < 0:
+            raise ValueError("La diferencia de precios no puede ser negativa.")
+
         from book_manager.scraper.runner import ejecutar_scraper
 
         print(f"🕷️ Iniciando scraping de competidor (Cúspide) con umbral de diferencia: ${umbral_diferencia:,.2f}...")
         items_scraped = ejecutar_scraper(libros=libros)
-        print(f"📦 Scraping finalizado. {len(items_scraped)} registros obtenidos de Cúspide.")
+        print(f"📦 Scraping finalizado. {len(items_scraped)} registros validados y persistidos en base de datos.")
 
-        alertas = self.comparar_precios(items_scraped, umbral_diferencia=umbral_diferencia)
-        ruta_generada = self.generar_alertas_csv(alertas, ruta_csv=ruta_csv)
+        comparaciones = self.comparar_precios(
+            items_scraped,
+            umbral_diferencia=umbral_diferencia,
+            tipo_dolar=tipo_dolar,
+        )
+        ruta_generada = self.generar_alertas_csv(
+            comparaciones,
+            ruta_csv=ruta_csv,
+            solo_alertas_activas=True,
+        )
 
-        total_activas = sum(1 for a in alertas if a.get("alerta_activa", False))
-        print(f"⚠️ Comparación completada: {total_activas} alertas activas detectadas.")
+        alertas_activas = [a for a in comparaciones if a.get("alerta_activa", False)]
+        print(f"⚠️ Comparación completada: {len(alertas_activas)} libros superan la diferencia de ${umbral_diferencia:,.2f}.")
         print(f"📄 Archivo CSV de alertas disponible en: {ruta_generada}")
 
         return {
             "items_scraped": items_scraped,
-            "alertas": alertas,
+            "comparaciones": comparaciones,
+            "alertas": alertas_activas,
             "total_extraidos": len(items_scraped),
-            "total_alertas": total_activas,
+            "total_alertas": len(alertas_activas),
             "archivo_csv": ruta_generada,
         }
 
@@ -1155,19 +1192,13 @@ class ComparadorPreciosService:
     ) -> str:
         """Genera un reporte analítico en formato Excel (.xlsx) con openpyxl.
 
-        Campos requeridos según especificación de Ejercicio 05:
-            - Libro: Título de la obra literaria
-            - Precio interno: Precio asignado en el catálogo interno en ARS
-            - Precio web: Precio extraído del competidor web (Cúspide Libros)
-            - Diferencia: Discrepancia calculada (Precio web - Precio interno)
-            - Fecha de extracción: Timestamp de captura del dato
+        Si no se suministran comparaciones, consulta los resultados más recientes
+        persistidos en la tabla ``precios_competidor`` y los contrasta con los
+        precios internos del catálogo.
 
         Args:
             comparaciones: Lista opcional de diccionarios con comparaciones.
-                Si no se proporciona, intenta leer desde reportes/alertas_precios.csv
-                o genera comparaciones a partir del catálogo interno.
-            ruta_excel: Ruta de destino opcional del archivo Excel. Por defecto
-                se guarda en 'reportes/reporte_precios.xlsx'.
+            ruta_excel: Ruta de destino opcional del archivo Excel.
 
         Returns:
             str: Ruta absoluta al archivo Excel generado.
@@ -1187,48 +1218,12 @@ class ComparadorPreciosService:
             if directorio_destino:
                 os.makedirs(directorio_destino, exist_ok=True)
 
-        # Si no se suministraron comparaciones, cargar desde alertas_precios.csv o catálogo
         if not comparaciones:
-            directorio_base = os.path.dirname(os.path.abspath(ruta_excel))
-            ruta_csv_alertas = os.path.join(directorio_base, "alertas_precios.csv")
-            if os.path.exists(ruta_csv_alertas):
-                comparaciones = []
-                with open(ruta_csv_alertas, mode="r", encoding="utf-8") as f:
-                    lector = csv.DictReader(f)
-                    for fila in lector:
-                        p_int_raw = fila.get("precio_interno")
-                        p_web_raw = fila.get("precio_web")
-                        dif_raw = fila.get("diferencia")
-                        try:
-                            p_int = float(p_int_raw) if p_int_raw not in (None, "", "N/D") else None
-                        except ValueError:
-                            p_int = None
-                        try:
-                            p_web = float(p_web_raw) if p_web_raw not in (None, "", "N/D") else None
-                        except ValueError:
-                            p_web = None
-                        try:
-                            dif = float(dif_raw) if dif_raw not in (None, "", "N/D") else 0.0
-                        except ValueError:
-                            dif = 0.0
-                        comparaciones.append({
-                            "titulo_interno": fila.get("titulo_interno") or fila.get("titulo_competidor") or "Desconocido",
-                            "precio_interno": p_int,
-                            "precio_web": p_web,
-                            "diferencia": dif,
-                            "fecha_extraccion": fila.get("fecha_extraccion") or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        })
-            else:
-                libros = self._libro_service.listar_todos()
-                items_mock = []
-                for lib in libros:
-                    items_mock.append({
-                        "titulo_interno": lib.titulo,
-                        "titulo_competidor": f"{lib.titulo.upper()} - {lib.autor.upper()}",
-                        "precio": None,
-                        "fecha_extraccion": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    })
-                comparaciones = self.comparar_precios(items_mock)
+            items_db: List[Dict[str, Any]] = []
+            if self._repo_precio_competidor is not None:
+                registros_db = self._repo_precio_competidor.leer_ultimos_por_libro()
+                items_db = [r.to_dict() for r in registros_db]
+            comparaciones = self.comparar_precios(items_db, umbral_diferencia=0.0)
 
         wb = openpyxl.Workbook()
         ws = wb.active
@@ -1401,23 +1396,25 @@ class BookManagerService:
         repo_moneda: Optional[RepositorioMoneda] = None,
         repo_tipo_cotizacion: Optional[RepositorioTipoCotizacion] = None,
         repo_precio: Optional[RepositorioPrecio] = None,
+        repo_precio_competidor: Optional[RepositorioPrecioCompetidor] = None,
         repo_stock: Optional[RepositorioStock] = None,
         repo_cotizacion: Optional[RepositorioCotizacionDolar] = None,
         repo_auditoria: Optional[RepositorioAuditoria] = None,
     ) -> None:
-        # Inicialización de Repositorios con Inyección de Dependencias
+        """Inicializa todos los repositorios y servicios del sistema."""
         self.repo_libro = repo_libro or RepositorioLibro()
         self.repo_genero = repo_genero or RepositorioGenero()
         self.repo_editorial = repo_editorial or RepositorioEditorial()
         self.repo_moneda = repo_moneda or RepositorioMoneda()
         self.repo_tipo_cotizacion = repo_tipo_cotizacion or RepositorioTipoCotizacion()
         self.repo_precio = repo_precio or RepositorioPrecio()
+        self.repo_precio_competidor = repo_precio_competidor or RepositorioPrecioCompetidor()
         self.repo_stock = repo_stock or RepositorioStock()
         self.repo_cotizacion = repo_cotizacion or RepositorioCotizacionDolar()
         self.repo_auditoria = repo_auditoria or RepositorioAuditoria()
 
-        # Inicialización de Servicios
-        self.auditoria_service = AuditoriaService(self.repo_auditoria)
+        self.servicio_auditoria = ServicioAuditoria(self.repo_auditoria)
+        self.auditoria_service = self.servicio_auditoria
         self.genero_service = GeneroService(self.repo_genero)
         self.editorial_service = EditorialService(self.repo_editorial)
         self.moneda_service = MonedaService(self.repo_moneda)
@@ -1435,6 +1432,7 @@ class BookManagerService:
         self.comparador_service = ComparadorPreciosService(
             self.libro_service,
             self.precio_service,
+            self.repo_precio_competidor,
         )
         self.reporte_service = ReporteService(
             self.libro_service,

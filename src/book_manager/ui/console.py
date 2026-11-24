@@ -435,9 +435,40 @@ class ConsolaUI:
         print(f"   📁 {ruta_destino}")
         return ruta_destino
 
-    # ---------------------------------------------------------
-    # SPRINT 3: SCRAPING Y ALERTAS DE PRECIOS
-    # ---------------------------------------------------------
+    def _solicitar_umbral_diferencia(self) -> Optional[float]:
+        """Solicita y valida la diferencia mínima de precios ingresada por el usuario.
+
+        Rechaza entradas vacías, no numéricas o negativas volviendo a solicitar
+        el dato hasta obtener un número mayor o igual a cero.
+
+        Returns:
+            Optional[float]: Diferencia validada (>= 0), o None si el usuario cancela.
+        """
+        while True:
+            try:
+                entrada = input(
+                    "Ingrese la diferencia mínima de precios para generar alertas [$] (valor >= 0): "
+                ).strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\n⚠️ Operación cancelada por el usuario.")
+                return None
+
+            if not entrada:
+                print("❌ Valor inválido: debe ingresar un número mayor o igual a 0.")
+                continue
+
+            try:
+                valor = float(entrada.replace(",", "."))
+            except ValueError:
+                print("❌ Valor inválido: ingrese un número válido (por ejemplo: 500 o 1200.50).")
+                continue
+
+            if valor < 0:
+                print("❌ Valor inválido: la diferencia de precios no puede ser negativa.")
+                continue
+
+            return valor
+
     def ejecutar_scraping_y_alertas(
         self,
         umbral_diferencia: Optional[float] = None,
@@ -447,24 +478,23 @@ class ConsolaUI:
         """Solicita el umbral de diferencia, ejecuta el scraper de Cúspide y genera alertas en CSV.
 
         Args:
-            umbral_diferencia: Diferencia mínima requerida para activar alerta. Si es None, se solicita al usuario.
-            libros: Lista opcional de títulos a buscar. Si es None, se usan los libros del catálogo interno.
+            umbral_diferencia: Diferencia mínima requerida para activar alerta.
+                Si es None, se solicita y valida interactivamente al usuario.
+            libros: Lista opcional de títulos a buscar. Si es None, se usan los del catálogo.
             ruta_csv: Ruta opcional de destino para el archivo CSV.
 
         Returns:
-            Dict[str, Any]: Resumen con items scrapeados, alertas y ruta del CSV.
+            Dict[str, Any]: Resumen con ítems scrapeados, alertas activas y ruta del CSV.
         """
         self.imprimir_encabezado("SCRAPING WEB Y ALERTAS DE PRECIOS (CÚSPIDE)")
 
         if umbral_diferencia is None:
-            try:
-                entrada = input("Ingrese la diferencia mínima de precios para generar alertas [$] (ej. 500.0, def: 0.0): ").strip()
-                umbral_diferencia = float(entrada) if entrada else 0.0
-            except (EOFError, KeyboardInterrupt):
-                umbral_diferencia = 0.0
-            except ValueError:
-                print("⚠️ Valor inválido. Se utilizará umbral por defecto: $0.00")
-                umbral_diferencia = 0.0
+            umbral_diferencia = self._solicitar_umbral_diferencia()
+            if umbral_diferencia is None:
+                return {}
+        elif umbral_diferencia < 0:
+            print("❌ Valor inválido: la diferencia de precios no puede ser negativa.")
+            return {}
 
         resultado = self.bm.comparador_service.ejecutar_scraping_y_alertas(
             umbral_diferencia=umbral_diferencia,
@@ -473,9 +503,10 @@ class ConsolaUI:
         )
 
         alertas = resultado.get("alertas", [])
-        self.imprimir_encabezado(f"COMPARATIVA DE PRECIOS (Umbral Alerta: ${umbral_diferencia:,.2f})")
+        self.imprimir_encabezado(f"ALERTAS DE PRECIOS QUE SUPERAN ${umbral_diferencia:,.2f}")
         if not alertas:
-            print("No se obtuvieron registros del scraping para comparar.")
+            print("No se detectaron libros que superen la diferencia de precios indicada.")
+            print(f"📄 Archivo CSV generado en: {resultado.get('archivo_csv', '')}")
             return resultado
 
         print(f"{'TÍTULO INTERNO':<22} | {'PRECIO INT':<11} | {'PRECIO WEB':<11} | {'DIFERENCIA':<12} | {'% DIF':<8} | {'ALERTA'}")
@@ -487,12 +518,12 @@ class ConsolaUI:
             dif = f"${a['diferencia']:+,.2f}" if a.get("precio_interno") is not None and a.get("precio_web") is not None else "-"
             dif_pct = f"{a['diferencia_porcentual']:+.1f}%" if a.get("precio_interno") is not None and a.get("precio_web") is not None else "-"
 
-            alerta_str = f"🔔 {a['tipo_alerta']}" if a.get("alerta_activa") else f"✅ {a['tipo_alerta']}"
+            alerta_str = f"🔔 {a['tipo_alerta']}"
             print(f"{t_int:<22} | {p_int:<11} | {p_web:<11} | {dif:<12} | {dif_pct:<8} | {alerta_str}")
 
         self.imprimir_separador(longitud=85)
-        print(f"📦 Total productos analizados: {resultado['total_extraidos']}")
-        print(f"⚠️ Alertas activas detectadas:  {resultado['total_alertas']}")
+        print(f"📦 Total productos extraídos:   {resultado['total_extraidos']}")
+        print(f"⚠️ Alertas que superan umbral: {resultado['total_alertas']}")
         print(f"📄 Archivo CSV generado en:    {resultado['archivo_csv']}")
         print("💡 Puede descargar el archivo CSV para su análisis detallado o importación en hojas de cálculo.")
         return resultado
@@ -597,143 +628,10 @@ class ConsolaUI:
         self.imprimir_separador(longitud=100)
         print(f"Total mostrados: {len(registros)} registros.")
 
-    # ---------------------------------------------------------
-    # DEMOSTRACIÓN COMPLETA PARA CHECKS DE EVALUACIÓN
-    # ---------------------------------------------------------
-    def ejecutar_demostracion_completa(self) -> None:
-        """Ejecuta secuencialmente listado, alta/modificación y reportes para cada modelo."""
-        self.imprimir_encabezado("🚀 EJECUCIÓN DE CHECKS Y VALIDACIONES - SPRINT 3")
-
-        # 1. LIBROS
-        print("\n--- 1. MODELO LIBRO ---")
-        self.listar_libros()
-        print(">> Alta / Modificación de Libro:")
-        lib = self.bm.libro_service.obtener_por_isbn("978-950-12-8888-8")
-        if not lib:
-            self.crear_libro(
-                isbn="978-950-12-8888-8",
-                titulo="Python Avanzado y Arquitectura",
-                autor="Guido van Rossum",
-                id_genero=1,
-                id_editorial=1,
-                anio=2026,
-                paginas=420,
-            )
-        else:
-            self.actualizar_libro(
-                id_libro=lib.id,
-                isbn="978-950-12-8888-8",
-                titulo="Python Avanzado y Arquitectura",
-                autor="Guido van Rossum",
-                id_genero=1,
-                id_editorial=1,
-                anio=2026,
-                paginas=420,
-            )
-
-        # 2. GÉNEROS
-        print("\n--- 2. MODELO GÉNERO ---")
-        self.listar_generos()
-        print(">> Alta / Modificación de Género:")
-        g = self.bm.genero_service.obtener_por_nombre("Inteligencia Artificial")
-        if not g:
-            self.crear_genero("Inteligencia Artificial", "Libros sobre IA, Machine Learning y Data Science")
-        else:
-            self.actualizar_genero(g.id, "Inteligencia Artificial", "Libros sobre IA, Machine Learning y Data Science")
-
-        # 3. EDITORIALES
-        print("\n--- 3. MODELO EDITORIAL ---")
-        self.listar_editoriales()
-        print(">> Alta / Modificación de Editorial:")
-        ed = self.bm.editorial_service.obtener_por_nombre("O'Reilly Media")
-        if not ed:
-            self.crear_editorial("O'Reilly Media", "Estados Unidos", "contacto@oreilly.com")
-        else:
-            self.actualizar_editorial(ed.id, "O'Reilly Media", "Estados Unidos", "contacto@oreilly.com")
-
-        # 4. MONEDAS
-        print("\n--- 4. MODELO MONEDA ---")
-        self.listar_monedas()
-        print(">> Alta / Modificación de Moneda:")
-        m = self.bm.moneda_service.obtener_por_codigo("GBP")
-        if not m:
-            self.crear_moneda("GBP", "Libra Esterlina", "£")
-        else:
-            self.actualizar_moneda(m.id, "GBP", "Libra Esterlina", "£")
-
-        # 5. TIPOS DE COTIZACIÓN
-        print("\n--- 5. MODELO TIPO COTIZACIÓN ---")
-        self.listar_tipos_cotizacion()
-        print(">> Alta / Modificación de Tipo de Cotización:")
-        tc = self.bm.tipo_cotizacion_service.obtener_por_nombre("Blue Inverso")
-        if not tc:
-            self.crear_tipo_cotizacion("Blue Inverso", "Cotización de paridad inversa Blue")
-        else:
-            self.actualizar_tipo_cotizacion(tc.id, "Blue Inverso", "Cotización de paridad inversa Blue")
-
-        # 6. COTIZACIONES
-        print("\n--- 6. MODELO COTIZACIÓN DÓLAR ---")
-        self.listar_cotizaciones()
-        print(">> Alta / Modificación de Cotización:")
-        self.registrar_cotizacion(1, "2026-10-11", 1490.0, 1540.0)
-
-        # 7. PRECIOS
-        print("\n--- 7. MODELO PRECIO ---")
-        self.listar_precios()
-        print(">> Alta / Modificación de Precio:")
-        self.fijar_precio(1, 1, 32000.0)
-
-        # 8. STOCK
-        print("\n--- 8. MODELO STOCK ---")
-        self.listar_stock()
-        print(">> Alta / Modificación de Stock:")
-        stk = self.bm.stock_service.obtener_stock_por_libro(1)
-        if not stk:
-            self.asignar_stock(1, 10, "Depósito Central")
-        else:
-            self.incrementar_stock(1, 5)
-
-        # 9. NUEVAS OPCIONES SPRINT 2 (EJERCICIO 08)
-        print("\n--- 9. NUEVAS FUNCIONALIDADES SOLICITADAS SPRINT 2 ---")
-        print("\n[Acción A: Obtener cotizaciones por API]")
-        self.obtener_cotizaciones_por_api()
-
-        print("\n[Acción B: Ver lista de precios bimonetaria]")
-        self.ver_precios_bimonetarios(codigo_moneda="USD", tipo_dolar="Blue")
-
-        print("\n[Acción C: Exportar precios a archivo CSV]")
-        self.exportar_precios_csv()
-
-        # 10. REPORTES
-        print("\n--- 10. REPORTES ANALÍTICOS ---")
-        self.mostrar_reporte_catalogo(tipo_dolar="Blue")
-        self.mostrar_reporte_valorizacion(tipo_dolar="Blue")
-        self.mostrar_reporte_stock_critico(umbral=5)
-        self.mostrar_reporte_generos()
-
-        print("\n[Reporte Excel: Precios internos vs web (openpyxl)]")
-        self.generar_reporte_excel_precios()
-
-        # 11. NUEVAS FUNCIONALIDADES SOLICITADAS SPRINT 3 (EJERCICIO 07)
-        print("\n--- 11. NUEVAS FUNCIONALIDADES SOLICITADAS SPRINT 3 (EJERCICIO 07) ---")
-        print("\n[Opción de Menú: Ejecutar scraping]")
-        self.ejecutar_scraping_y_alertas(umbral_diferencia=500.0)
-
-        print("\n[Opción de Menú: Generar reporte]")
-        self.generar_reporte_excel_precios()
-
-        print("\n[Opción de Menú: Ver historial de auditoría]")
-        self.listar_auditorias(limite=10)
-
-        print("\n✅ Demostración y comprobaciones completadas exitosamente.")
-
-    # ---------------------------------------------------------
-    # Menú Interactivo de Navegación con Match-Case
-    # ---------------------------------------------------------
     def iniciar_menu_interactivo(self) -> None:
         """Menú principal interactivo de consola utilizando coincidencia de patrones (match-case)."""
         while True:
-            self.imprimir_encabezado("BOOK MANAGER - MENÚ PRINCIPAL (SPRINT 3)")
+            self.imprimir_encabezado("BOOK MANAGER - MENÚ PRINCIPAL")
             print("1. 📚 Catálogo y Gestión de Libros")
             print("2. 🏷️  Géneros Literarios")
             print("3. 🏢 Editoriales y Distribuidoras")
@@ -745,10 +643,9 @@ class ConsolaUI:
             print("9. 💱 Ver Lista de Precios Bimonetaria (ARS / USD)")
             print("10. 💾 Exportar Lista de Precios a CSV")
             print("11. 📊 Menú de Reportes Analíticos")
-            print("12. 🚀 Ejecutar Demostración Completa (Auto-Check)")
-            print("13. 🕷️ Ejecutar scraping")
-            print("14. 📑 Generar reporte")
-            print("15. 📋 Ver historial de auditoría")
+            print("12. 🕷️ Ejecutar scraping")
+            print("13. 📑 Generar reporte")
+            print("14. 📋 Ver historial de auditoría")
             print("0. 🚪 Salir del Sistema")
             self.imprimir_separador()
 
@@ -779,13 +676,11 @@ class ConsolaUI:
                     self.exportar_precios_csv()
                 case "11":
                     self._menu_reportes()
-                case "12":
-                    self.ejecutar_demostracion_completa()
-                case "13" | "ejecutar scraping" | "scraping":
+                case "12" | "ejecutar scraping" | "scraping":
                     self.ejecutar_scraping_y_alertas()
-                case "14" | "generar reporte" | "reporte":
+                case "13" | "generar reporte" | "reporte":
                     self.generar_reporte_excel_precios()
-                case "15" | "ver historial de auditoria" | "ver historial de auditoría" | "auditoria" | "auditoría":
+                case "14" | "ver historial de auditoria" | "ver historial de auditoría" | "auditoria" | "auditoría":
                     limite_str = input("Cantidad de registros a consultar (def: 50): ").strip()
                     limite = int(limite_str) if limite_str.isdigit() else 50
                     self.listar_auditorias(limite=limite)

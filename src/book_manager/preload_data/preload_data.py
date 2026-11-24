@@ -73,9 +73,6 @@ class PrecargaDatos:
                     return alt
         return ruta_completa
 
-    def _configurar_rutas_repositorios() -> None:
-        pass
-
     def _configurar_rutas_repositorios(self) -> None:
         """Configura los archivos CSV asociados a cada repositorio si corresponde."""
         for repo_attr, archivo in [
@@ -284,29 +281,68 @@ def _extraer_sentencias_sql(contenido: str) -> List[str]:
     return sentencias
 
 
+def _ejecutar_archivo_sql(
+    session: object,
+    ruta_archivo: str,
+    es_postgresql: bool,
+) -> int:
+    """Ejecuta todas las sentencias de un archivo SQL dentro de la sesión activa.
+
+    Args:
+        session: Sesión transaccional de SQLAlchemy.
+        ruta_archivo: Ruta absoluta al script .sql.
+        es_postgresql: Indica si el motor de base de datos es PostgreSQL.
+
+    Returns:
+        int: Cantidad de registros afectados por las sentencias ejecutadas.
+    """
+    with open(ruta_archivo, mode="r", encoding="utf-8") as f:
+        sentencias = _extraer_sentencias_sql(f.read())
+
+    insertados = 0
+    for sentencia in sentencias:
+        sentencia_ejecutar = sentencia
+        es_ddl = bool(re.match(r"(?i)^\s*(CREATE|ALTER|DROP)\s+", sentencia_ejecutar))
+        if es_ddl and not es_postgresql:
+            continue
+
+        if re.match(r"(?i)^\s*INSERT\s+INTO", sentencia_ejecutar):
+            if "ON CONFLICT" not in sentencia_ejecutar.upper():
+                sentencia_ejecutar = f"{sentencia_ejecutar} ON CONFLICT (id) DO NOTHING"
+
+        res = session.execute(text(sentencia_ejecutar))
+        if res.rowcount is not None and res.rowcount > 0:
+            insertados += res.rowcount
+        elif not es_ddl:
+            insertados += 1
+
+    return insertados
+
+
 def cargar_datos_desde_sql(
     ruta_origen: Optional[str] = None,
     conexion: Optional[ConexionDB] = None,
 ) -> Dict[str, int]:
-    """Carga y ejecuta sentencias SQL para poblar la base de datos relacional.
+    """Carga y ejecuta sentencias SQL para poblar la base de datos de forma atómica.
 
-    Lee scripts .sql individuales o un directorio con archivos SQL estructurados
-    respetando el orden de dependencias referenciales e integridad relacional.
+    Lee scripts .sql individuales o un directorio con archivos SQL respetando
+    el orden de dependencias referenciales. Toda la carga se ejecuta dentro de
+    una única transacción: si alguna sentencia falla, se realiza rollback completo
+    y se propaga la excepción para evitar dejar la base cargada a medias.
 
     Args:
-        ruta_origen (Optional[str]): Ruta hacia un archivo .sql específico o hacia
-            el directorio que contiene los scripts SQL (por defecto 'migrations/sql').
-        conexion (Optional[ConexionDB]): Instancia de ConexionDB para ejecutar
-            las sentencias. Si no se especifica, utiliza la instancia Singleton.
+        ruta_origen: Ruta hacia un archivo .sql o al directorio de scripts SQL.
+        conexion: Instancia de ConexionDB. Si es None, utiliza el Singleton.
 
     Returns:
-        Dict[str, int]: Diccionario con la cantidad de sentencias ejecutadas
-            exitosamente por cada tabla o script procesado.
+        Dict[str, int]: Cantidad de registros procesados por cada tabla o script.
+
+    Raises:
+        Exception: Si ocurre cualquier error SQL, revirtiendo toda la transacción.
     """
     if conexion is None:
         conexion = ConexionDB.get_instancia()
 
-    # Resolver la ruta de origen por defecto si no fue provista
     if ruta_origen is None:
         candidatos = [
             os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "migrations", "sql")),
@@ -325,103 +361,44 @@ def cargar_datos_desde_sql(
         print(f"⚠️ Advertencia: No se encontró la ruta de scripts SQL: {ruta_origen}")
         return {}
 
+    from book_manager.models.models import Base
+
+    Base.metadata.create_all(bind=conexion.engine, checkfirst=True)
+    es_postgresql = "postgresql" in str(conexion.engine.url)
     resumen: Dict[str, int] = {}
 
-    with conexion.obtener_sesion() as session:
-        # Caso 1: Se pasó un archivo .sql individual
-        if os.path.isfile(ruta_origen):
-            nombre_tabla = os.path.splitext(os.path.basename(ruta_origen))[0]
-            with open(ruta_origen, mode="r", encoding="utf-8") as f:
-                sentencias = _extraer_sentencias_sql(f.read())
+    try:
+        with conexion.obtener_sesion() as session:
+            if os.path.isfile(ruta_origen):
+                nombre_tabla = os.path.splitext(os.path.basename(ruta_origen))[0]
+                resumen[nombre_tabla] = _ejecutar_archivo_sql(session, ruta_origen, es_postgresql)
+            elif os.path.isdir(ruta_origen):
+                archivos_procesados = set()
 
-            insertados = 0
-            for sentencia in sentencias:
-                sentencia_ejecutar = sentencia
-                if re.match(r"(?i)^\s*INSERT\s+INTO", sentencia_ejecutar):
-                    if "ON CONFLICT" not in sentencia_ejecutar.upper():
-                        sentencia_ejecutar = f"{sentencia_ejecutar} ON CONFLICT (id) DO NOTHING"
+                for tabla in ORDEN_TABLAS_SQL:
+                    nombre_archivo = f"{tabla}.sql"
+                    ruta_archivo = os.path.join(ruta_origen, nombre_archivo)
+                    if not os.path.exists(ruta_archivo):
+                        continue
+                    archivos_procesados.add(nombre_archivo)
+                    resumen[tabla] = _ejecutar_archivo_sql(session, ruta_archivo, es_postgresql)
 
-                try:
-                    res = session.execute(text(sentencia_ejecutar))
-                    if res.rowcount is not None and res.rowcount > 0:
-                        insertados += res.rowcount
-                    else:
-                        insertados += 1
-                except Exception as e:
-                    print(f"Error ejecutando SQL en {nombre_tabla}: {e}")
+                for archivo in sorted(os.listdir(ruta_origen)):
+                    if archivo.endswith(".sql") and archivo not in archivos_procesados:
+                        tabla_extra = os.path.splitext(archivo)[0]
+                        ruta_archivo = os.path.join(ruta_origen, archivo)
+                        resumen[tabla_extra] = _ejecutar_archivo_sql(session, ruta_archivo, es_postgresql)
 
-            resumen[nombre_tabla] = insertados
-
-        # Caso 2: Se pasó un directorio con múltiples archivos .sql
-        elif os.path.isdir(ruta_origen):
-            # Procesar primero las tablas conocidas en orden de dependencias
-            archivos_procesados = set()
-
-            for tabla in ORDEN_TABLAS_SQL:
-                nombre_archivo = f"{tabla}.sql"
-                ruta_archivo = os.path.join(ruta_origen, nombre_archivo)
-                if not os.path.exists(ruta_archivo):
-                    continue
-
-                archivos_procesados.add(nombre_archivo)
-                with open(ruta_archivo, mode="r", encoding="utf-8") as f:
-                    sentencias = _extraer_sentencias_sql(f.read())
-
-                insertados = 0
-                for sentencia in sentencias:
-                    sentencia_ejecutar = sentencia
-                    if re.match(r"(?i)^\s*INSERT\s+INTO", sentencia_ejecutar):
-                        if "ON CONFLICT" not in sentencia_ejecutar.upper():
-                            sentencia_ejecutar = f"{sentencia_ejecutar} ON CONFLICT (id) DO NOTHING"
-
-                    try:
-                        res = session.execute(text(sentencia_ejecutar))
-                        if res.rowcount is not None and res.rowcount > 0:
-                            insertados += res.rowcount
-                        else:
-                            insertados += 1
-                    except Exception as e:
-                        print(f"Error ejecutando SQL en {tabla}: {e}")
-
-                resumen[tabla] = insertados
-
-            # Procesar cualquier otro archivo .sql que pudiera existir en el directorio
-            for archivo in sorted(os.listdir(ruta_origen)):
-                if archivo.endswith(".sql") and archivo not in archivos_procesados:
-                    tabla_extra = os.path.splitext(archivo)[0]
-                    ruta_archivo = os.path.join(ruta_origen, archivo)
-                    with open(ruta_archivo, mode="r", encoding="utf-8") as f:
-                        sentencias = _extraer_sentencias_sql(f.read())
-
-                    insertados = 0
-                    for sentencia in sentencias:
-                        sentencia_ejecutar = sentencia
-                        if re.match(r"(?i)^\s*INSERT\s+INTO", sentencia_ejecutar):
-                            if "ON CONFLICT" not in sentencia_ejecutar.upper():
-                                sentencia_ejecutar = f"{sentencia_ejecutar} ON CONFLICT (id) DO NOTHING"
-
-                        try:
-                            res = session.execute(text(sentencia_ejecutar))
-                            if res.rowcount is not None and res.rowcount > 0:
-                                insertados += res.rowcount
-                            else:
-                                insertados += 1
-                        except Exception as e:
-                            print(f"Error ejecutando SQL en {tabla_extra}: {e}")
-
-                    resumen[tabla_extra] = insertados
-
-        # Ajuste de secuencias seriales si el motor de base de datos es PostgreSQL
-        if "postgresql" in str(conexion.engine.url):
-            for tabla in ORDEN_TABLAS_SQL:
-                try:
+            if es_postgresql:
+                for tabla in ORDEN_TABLAS_SQL:
                     seq_query = text(
                         f"SELECT setval(pg_get_serial_sequence('{tabla}', 'id'), "
                         f"COALESCE(MAX(id), 1), MAX(id) IS NOT NULL) FROM {tabla};"
                     )
                     session.execute(seq_query)
-                except Exception:
-                    pass
+    except Exception as exc:
+        print(f"❌ Error durante la carga SQL (transacción revertida con rollback): {exc}")
+        raise
 
     print(f"✅ Carga de datos desde SQL completada exitosamente: {resumen}")
     return resumen

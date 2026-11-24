@@ -1,3 +1,18 @@
+[Correcciones TP03]
+* Ejercicio 02: Integración efectiva de `cargar_datos_desde_sql()` en `src/book_manager/main.py` cuando `import_default_data=True`, y refactorización transaccional en `src/book_manager/preload_data/preload_data.py` para ejecutar la carga de forma atómica con rollback completo ante cualquier error SQL (sin continuar a medias).
+* Ejercicio 03:
+  - Eliminación de textos inventados/fallback en `CuspideSpider` (`cuspide_spider.py`) y `ValidacionLibroPipeline` (`pipelines.py`): los datos ausentes en Cúspide (formas de pago, sinopsis, portada, autor) permanecen vacíos.
+  - Persistencia en base de datos de los resultados del scraping mediante el modelo `PrecioCompetidorModel`, entidad `PrecioCompetidor`, repositorio `RepositorioPrecioCompetidor`, script `migrations/sql/precios_competidor.sql` y pipeline `PersistenciaDBPipeline`, vinculando cada registro con `id_libro`.
+  - Endurecimiento de validación de correspondencia título/autor en `ValidacionLibroPipeline` para descartar falsos positivos como "FICCIONES CON CIENCIA".
+  - Activación de `ROBOTSTXT_OBEY = True` e identificación con `USER_AGENT` propio (`BookManagerBot/1.0`) en `src/book_manager/scraper/settings.py`.
+* Ejercicio 04:
+  - Validación interactiva en bucle de la diferencia de precios en `ConsolaUI._solicitar_umbral_diferencia()` rechazando entradas vacías, no numéricas o negativas.
+  - Conversión automática a ARS de libros con precio interno en USD utilizando las cotizaciones del Sprint 2 (`PrecioService.obtener_precio_estimado()`).
+  - Generación de archivos CSV de alertas con fecha y hora en el nombre (`alertas_precios_YYYYMMDD_HHMMSS.csv`) sin sobrescribir corridas anteriores, listando exclusivamente los libros que superan la diferencia ingresada.
+* Ejercicio 06: Renombrado del servicio a `ServicioAuditoria` (según consigna) y delegación de la persistencia del decorador `@auditar` a través de `RepositorioAuditoria`.
+* Ejercicio 07: Eliminación completa del modo demostración automatizada (`ejecutar_demostracion_completa()` y valores fijos hardcodeados) en `console.py` y `main.py`, abriendo siempre el menú interactivo real tanto en consola local como en Google Colab.
+* Estándares Python: Revisión de docstrings PEP 257, type hints y limpieza de comentarios redundantes en los módulos modificados.
+
 [Ejercicio 7]
 * Implementación e integración de las opciones de menú solicitadas para el Sprint 3 en la interfaz de consola (`src/book_manager/ui/console.py`):
   - "Ejecutar scraping": Ejecución del scraper de Cúspide Libros, comparación sistemática de precios con el catálogo propio evaluando el umbral de diferencia configurado por el usuario y persistencia del archivo CSV de alertas en `src/book_manager/reportes/alertas_precios.csv`.
